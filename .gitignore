@@ -1,0 +1,78 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# EAS build & native credentials
+.eas/
+*.jks
+*.p8
+*.p12
+*.key
+*.keystore
+*.mobileprovision
+*.pem
+
+# Native generated CNG folders (configured via app.json & config plugins)
+/ios
+/android
+.kotlin/
+*.orig.*
+
+# Environment variables & secrets (commit .env.example instead)
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local cache & branches
+supabase/.temp/
+.branches/
+
+# TypeScript & Metro build caches
+*.tsbuildinfo
+.metro-health-check*
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+
+# Logs & Debugging
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# IDE & Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# AI Agent Configs, Instructions & Skills
+.agents/
+.prd
+AGENTS.md
+skills-lock.json
+
+# Temporary artifacts
+temp_app/
+
