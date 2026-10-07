@@ -18,10 +18,12 @@ DECLARE
     admin_password TEXT := 'password123';
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = admin_email) THEN
-        -- Insert ke auth.users
+        -- Insert ke auth.users dengan seluruh kolom token non-null (kompatibilitas GoTrue)
         INSERT INTO auth.users (
-            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, 
-            raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+            recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
+            created_at, updated_at, confirmation_token, email_change, email_change_token_new,
+            recovery_token, phone, phone_change, phone_change_token, reauthentication_token
         ) VALUES (
             '00000000-0000-0000-0000-000000000000',
             new_user_id,
@@ -30,16 +32,27 @@ BEGIN
             admin_email,
             crypt(admin_password, gen_salt('bf')),
             now(),
+            now(),
+            now(),
             '{"provider":"email","providers":["email"]}',
             '{"name":"Super Administrator"}',
             now(),
-            now()
+            now(),
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            ''
         );
 
         -- Insert ke auth.identities
         INSERT INTO auth.identities (
-            provider_id, user_id, identity_data, provider, created_at, updated_at
+            id, provider_id, user_id, identity_data, provider, created_at, updated_at
         ) VALUES (
+            gen_random_uuid(),
             new_user_id::text,
             new_user_id,
             format('{"sub":"%s","email":"%s"}', new_user_id::text, admin_email)::jsonb,
@@ -53,7 +66,22 @@ BEGIN
         VALUES (new_user_id, admin_email, 'Admin', 'Aktif')
         ON CONFLICT (id) DO UPDATE SET role = 'Admin', status = 'Aktif';
     ELSE
-        -- Jika auth user sudah ada, pastikan role di public.users adalah Admin
+        -- Jika auth user sudah ada, perbaiki kolom NULL (mencegah error 500 Database error querying schema)
+        UPDATE auth.users
+        SET confirmation_token = COALESCE(confirmation_token, ''),
+            recovery_token = COALESCE(recovery_token, ''),
+            email_change_token_new = COALESCE(email_change_token_new, ''),
+            email_change_token_current = COALESCE(email_change_token_current, ''),
+            email_change = COALESCE(email_change, ''),
+            phone = COALESCE(phone, ''),
+            phone_change = COALESCE(phone_change, ''),
+            phone_change_token = COALESCE(phone_change_token, ''),
+            reauthentication_token = COALESCE(reauthentication_token, ''),
+            encrypted_password = crypt(admin_password, gen_salt('bf')),
+            email_confirmed_at = COALESCE(email_confirmed_at, now())
+        WHERE email = admin_email;
+
+        -- Pastikan role di public.users adalah Admin
         UPDATE public.users SET role = 'Admin', status = 'Aktif' WHERE email = admin_email;
     END IF;
 END $$;

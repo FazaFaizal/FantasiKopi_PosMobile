@@ -7,9 +7,16 @@ import {
   getDefaultRouteForRole,
 } from "../lib/auth-logic";
 import { statusTone } from "../components/Badge";
+import { Platform } from "react-native";
 
-describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
-  describe("Validasi Format Email", () => {
+export function getAuthKeyboardBehavior(
+  os: typeof Platform.OS,
+): "padding" | "height" | undefined {
+  return os === "ios" ? "padding" : undefined;
+}
+
+describe("Iterasi 1 - Autentikasi, Karyawan & Akun Pengguna (Auth & User Management)", () => {
+  describe("1.1 Validasi Format Email", () => {
     it("menerima alamat email yang valid", () => {
       expect(validateEmail("admin@fantasicoffee.id").isValid).toBe(true);
       expect(validateEmail("kasir1@faza.com").isValid).toBe(true);
@@ -30,7 +37,7 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Validasi Password", () => {
+  describe("1.2 Validasi Password", () => {
     it("menerima password 6 karakter atau lebih", () => {
       expect(validatePassword("123456").isValid).toBe(true);
       expect(validatePassword("password123").isValid).toBe(true);
@@ -49,7 +56,7 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Validasi Data Karyawan", () => {
+  describe("1.3 Validasi Data Karyawan (Employee Management)", () => {
     it("menerima data karyawan lengkap dengan nomor telepon valid", () => {
       const res = validateEmployeeInput("Ahmad Barista", "081234567890");
       expect(res.isValid).toBe(true);
@@ -74,7 +81,7 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Kontrol Hak Akses Berbasis Role (RBAC)", () => {
+  describe("1.4 Kontrol Hak Akses Berbasis Role (RBAC)", () => {
     it("mengizinkan Admin mengakses grup (admin) dan menolak role lain", () => {
       expect(checkRoleRouteAccess("Admin", "(admin)")).toBe(true);
       expect(checkRoleRouteAccess("Kasir", "(admin)")).toBe(false);
@@ -98,7 +105,7 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Sinkronisasi Status Karyawan & Akun Pengguna (PRD Section 8)", () => {
+  describe("1.5 Sinkronisasi Status Karyawan & Akun Pengguna (PRD Section 8)", () => {
     it("mengubah status akun menjadi Nonaktif jika karyawan dinonaktifkan", () => {
       expect(syncEmployeeStatusToUser("Nonaktif", "Aktif")).toBe("Nonaktif");
       expect(syncEmployeeStatusToUser("Nonaktif", "Nonaktif")).toBe("Nonaktif");
@@ -110,7 +117,7 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Navigasi Default Berdasarkan Role & Status", () => {
+  describe("1.6 Navigasi Default Berdasarkan Role & Status", () => {
     it("mengarahkan akun Nonaktif ke layar inactive tanpa memandang role", () => {
       expect(getDefaultRouteForRole("Admin", "Nonaktif")).toBe(
         "/(auth)/inactive",
@@ -134,10 +141,19 @@ describe("Iterasi 1 - Autentikasi, Akun & Hak Akses Pengguna", () => {
     });
   });
 
-  describe("Helper Badge Status Tone", () => {
+  describe("1.7 Penanganan Keyboard & Status Tone Akun", () => {
     it("memetakan status Aktif ke tone success dan Nonaktif ke danger", () => {
       expect(statusTone("Aktif")).toBe("success");
       expect(statusTone("Nonaktif")).toBe("danger");
     });
+
+    it("menetapkan keyboard behavior undefined pada Android untuk mencegah glitch double-resize", () => {
+      expect(getAuthKeyboardBehavior("android")).toBeUndefined();
+    });
+
+    it("menetapkan keyboard behavior padding pada iOS untuk transisi mulus", () => {
+      expect(getAuthKeyboardBehavior("ios")).toBe("padding");
+    });
   });
 });
+
