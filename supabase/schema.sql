@@ -309,6 +309,13 @@ CREATE POLICY "Anyone can view products"
     TO authenticated
     USING (is_active = true OR public.is_admin());
 
+DROP POLICY IF EXISTS "Staff can update product status" ON public.products;
+CREATE POLICY "Staff can update product status"
+    ON public.products FOR UPDATE
+    TO authenticated
+    USING (public.is_staff())
+    WITH CHECK (public.is_staff());
+
 DROP POLICY IF EXISTS "Admins can manage products" ON public.products;
 CREATE POLICY "Admins can manage products"
     ON public.products FOR ALL

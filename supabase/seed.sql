@@ -86,6 +86,72 @@ BEGIN
     END IF;
 END $$;
 
+-- 2.1 Akun Kasir POS Kedai
+--     Email: kasir@faza.com
+--     Password: password123
+DO $$
+DECLARE
+    kasir_user_id UUID := '00000000-0000-0000-0000-000000000002';
+    kasir_email TEXT := 'kasir@faza.com';
+    kasir_password TEXT := 'password123';
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = kasir_email) THEN
+        INSERT INTO auth.users (
+            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+            recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
+            created_at, updated_at, confirmation_token, email_change, email_change_token_new,
+            recovery_token, phone, phone_change, phone_change_token, reauthentication_token
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000000',
+            kasir_user_id,
+            'authenticated',
+            'authenticated',
+            kasir_email,
+            crypt(kasir_password, gen_salt('bf')),
+            now(),
+            now(),
+            now(),
+            '{"provider":"email","providers":["email"]}',
+            '{"name":"Kasir Fantasi Coffee"}',
+            now(),
+            now(),
+            '', '', '', '', '', '', '', ''
+        );
+
+        INSERT INTO auth.identities (
+            id, provider_id, user_id, identity_data, provider, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            kasir_user_id::text,
+            kasir_user_id,
+            format('{"sub":"%s","email":"%s"}', kasir_user_id::text, kasir_email)::jsonb,
+            'email',
+            now(),
+            now()
+        );
+
+        INSERT INTO public.users (id, email, role, status)
+        VALUES (kasir_user_id, kasir_email, 'Kasir', 'Aktif')
+        ON CONFLICT (id) DO UPDATE SET role = 'Kasir', status = 'Aktif';
+    ELSE
+        UPDATE auth.users
+        SET confirmation_token = COALESCE(confirmation_token, ''),
+            recovery_token = COALESCE(recovery_token, ''),
+            email_change_token_new = COALESCE(email_change_token_new, ''),
+            email_change_token_current = COALESCE(email_change_token_current, ''),
+            email_change = COALESCE(email_change, ''),
+            phone = COALESCE(phone, ''),
+            phone_change = COALESCE(phone_change, ''),
+            phone_change_token = COALESCE(phone_change_token, ''),
+            reauthentication_token = COALESCE(reauthentication_token, ''),
+            encrypted_password = crypt(kasir_password, gen_salt('bf')),
+            email_confirmed_at = COALESCE(email_confirmed_at, now())
+        WHERE email = kasir_email;
+
+        UPDATE public.users SET role = 'Kasir', status = 'Aktif' WHERE email = kasir_email;
+    END IF;
+END $$;
+
 -- 3. Kategori Produk Awal
 INSERT INTO public.categories (id, name, description, status) VALUES
     ('11111111-1111-1111-1111-111111111101', 'Espresso & Coffee', 'Kopi klasik berbasis espresso dan susu segar pilihan', 'Aktif'),

@@ -80,6 +80,28 @@ export const SIDEBAR_NAV_ITEMS: {
   ],
 };
 
+export const KASIR_NAV_ITEMS: {
+  main: SidebarNavItem[];
+  management?: SidebarNavItem[];
+} = {
+  main: [
+    {
+      id: "pos",
+      route: "/(kasir)/pos",
+      title: "Terminal POS",
+      subtitle: "Katalog Menu & Transaksi Kasir",
+      icon: Store,
+    },
+    {
+      id: "inventory",
+      route: "/(kasir)/inventory",
+      title: "Bahan Baku & Stok",
+      subtitle: "Inventaris Gudang & Mutasi Bahan",
+      icon: Package,
+    },
+  ],
+};
+
 export interface SidebarDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -90,6 +112,10 @@ export interface SidebarDrawerProps {
   onLogout: () => void;
   activeRoute?: string;
   onNavigate?: (route: string) => void;
+  navItems?: {
+    main: SidebarNavItem[];
+    management?: SidebarNavItem[];
+  };
 }
 
 export const AdminSidebarContext = React.createContext<{
@@ -104,6 +130,18 @@ export function useAdminSidebar() {
   return React.useContext(AdminSidebarContext);
 }
 
+export const KasirSidebarContext = React.createContext<{
+  openSidebar: () => void;
+  closeSidebar: () => void;
+}>({
+  openSidebar: () => {},
+  closeSidebar: () => {},
+});
+
+export function useKasirSidebar() {
+  return React.useContext(KasirSidebarContext);
+}
+
 export function SidebarDrawer({
   isOpen,
   onClose,
@@ -111,6 +149,7 @@ export function SidebarDrawer({
   onLogout,
   activeRoute = "/(admin)/dashboard",
   onNavigate,
+  navItems = SIDEBAR_NAV_ITEMS,
 }: SidebarDrawerProps) {
   const insets = useSafeAreaInsets();
   const { isTablet, orientationMode, setOrientationMode } = useResponsive();
@@ -221,9 +260,9 @@ export function SidebarDrawer({
           >
             {/* Main Operations Section */}
             <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider px-2 mb-2">
-              Fitur Operasional Utama
+              Fitur Utama
             </Text>
-            {SIDEBAR_NAV_ITEMS.main.map((item) => {
+            {navItems.main.map((item) => {
               const isActive = activeRoute.startsWith(item.route);
               const Icon = item.icon;
 
@@ -266,52 +305,56 @@ export function SidebarDrawer({
               );
             })}
 
-            {/* Management & Master Section */}
-            <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider px-2 mt-4 mb-2">
-              Administrasi &amp; Master Data
-            </Text>
-            {SIDEBAR_NAV_ITEMS.management.map((item) => {
-              const isActive = activeRoute.startsWith(item.route);
-              const Icon = item.icon;
+            {/* Management & Master Section (Hanya jika ada) */}
+            {navItems.management && navItems.management.length > 0 && (
+              <>
+                <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider px-2 mt-4 mb-2">
+                  Administrasi &amp; Master Data
+                </Text>
+                {navItems.management.map((item) => {
+                  const isActive = activeRoute.startsWith(item.route);
+                  const Icon = item.icon;
 
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={item.title}
-                  accessibilityState={{ selected: isActive }}
-                  onPress={() => handleItemPress(item.route)}
-                  className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border transition-all ${
-                    isActive
-                      ? "bg-primary/10 border-primary/30"
-                      : "bg-surface border-transparent"
-                  }`}
-                >
-                  <View
-                    className={`w-9 h-9 rounded-chip items-center justify-center mr-3 ${
-                      isActive ? "bg-primary" : "bg-background border border-line"
-                    }`}
-                  >
-                    <Icon size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
-                  </View>
-                  <View className="flex-1">
-                    <Text
-                      className={`font-heading-semibold text-sm ${
-                        isActive ? "text-primary" : "text-text"
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={item.title}
+                      accessibilityState={{ selected: isActive }}
+                      onPress={() => handleItemPress(item.route)}
+                      className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border transition-all ${
+                        isActive
+                          ? "bg-primary/10 border-primary/30"
+                          : "bg-surface border-transparent"
                       }`}
                     >
-                      {item.title}
-                    </Text>
-                    <Text
-                      className="font-body text-muted text-xs mt-0.5"
-                      numberOfLines={1}
-                    >
-                      {item.subtitle}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
+                      <View
+                        className={`w-9 h-9 rounded-chip items-center justify-center mr-3 ${
+                          isActive ? "bg-primary" : "bg-background border border-line"
+                        }`}
+                      >
+                        <Icon size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          className={`font-heading-semibold text-sm ${
+                            isActive ? "text-primary" : "text-text"
+                          }`}
+                        >
+                          {item.title}
+                        </Text>
+                        <Text
+                          className="font-body text-muted text-xs mt-0.5"
+                          numberOfLines={1}
+                        >
+                          {item.subtitle}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
           </ScrollView>
 
           {/* Footer Section with Orientation & Logout */}

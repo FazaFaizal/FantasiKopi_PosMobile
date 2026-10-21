@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View, Platform, StatusBar } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +10,7 @@ interface ScreenHeaderProps {
   backTo?: string;
   rightAction?: React.ReactNode;
   onOpenSidebar?: () => void;
+  onClose?: () => void;
 }
 
 export function ScreenHeader({
@@ -18,14 +19,21 @@ export function ScreenHeader({
   backTo,
   rightAction,
   onOpenSidebar,
+  onClose,
 }: ScreenHeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
+  // Pastikan ruang aman (safe area) dari status bar Android, notch, maupun punch-hole kamera
+  const topInset = Math.max(
+    insets.top,
+    Platform.OS === "android" ? (StatusBar.currentHeight || 28) : 24
+  );
+
   return (
     <View
-      className="bg-primary-dark px-4 pb-3.5 shadow-sm"
-      style={{ paddingTop: Math.max(insets.top + 8, 18) }}
+      className="bg-primary-dark px-4 pb-4 shadow-sm"
+      style={{ paddingTop: topInset + 12 }}
     >
       <View className="flex-row items-center justify-between min-h-11">
         {/* Left Container: Icon Bar + Title & Subtitle (Sejajar Horisontal) */}
@@ -39,6 +47,16 @@ export function ScreenHeader({
               className="w-10 h-10 rounded-full bg-white/15 items-center justify-center mr-3"
             >
               <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          ) : onClose ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Tutup modal"
+              onPress={onClose}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              className="w-10 h-10 rounded-full bg-white/15 items-center justify-center mr-3"
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
           ) : onOpenSidebar ? (
             <TouchableOpacity

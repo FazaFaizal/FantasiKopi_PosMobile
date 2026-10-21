@@ -20,6 +20,7 @@ import { Badge } from '../../components/Badge';
 import { ChoiceGroup } from '../../components/ChoiceGroup';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
+import { useKasirSidebar } from '../../components/SidebarDrawer';
 import { useAuth } from '../../lib/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { computeStockStatus } from '../../lib/inventory-logic';
@@ -30,6 +31,7 @@ type StockMovement = Database['public']['Tables']['stock_movements']['Row'];
 
 export default function KasirInventoryScreen() {
   const { user } = useAuth();
+  const { openSidebar } = useKasirSidebar();
   const { isTablet, columns } = useResponsive();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -359,6 +361,7 @@ export default function KasirInventoryScreen() {
       <ScreenHeader
         title="Stok Bahan Kasir"
         subtitle="Pencatatan Stok Masuk & Keluar Barista"
+        onOpenSidebar={openSidebar}
         backTo="/(kasir)/pos"
       />
 

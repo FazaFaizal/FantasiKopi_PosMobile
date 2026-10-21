@@ -6,7 +6,11 @@ import { Button } from "../components/Button";
 import { ChoiceGroup } from "../components/ChoiceGroup";
 import { Input } from "../components/Input";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
-import { SidebarDrawer, SIDEBAR_NAV_ITEMS } from "../components/SidebarDrawer";
+import {
+  SidebarDrawer,
+  SIDEBAR_NAV_ITEMS,
+  KASIR_NAV_ITEMS,
+} from "../components/SidebarDrawer";
 import { ScreenHeader } from "../components/ScreenHeader";
 import {
   getDeviceType,
@@ -251,6 +255,13 @@ describe("Shared UI & Responsive Architecture (UI Components, Sidebar & Tablet L
       expect(mgmtRoutes).toContain("/(admin)/category");
       expect(mgmtRoutes).toContain("/(admin)/employee");
       expect(mgmtRoutes).toContain("/(admin)/user");
+    });
+
+    it("mendefinisikan navigasi sidebar khusus kasir tanpa konflik navbar", () => {
+      expect(KASIR_NAV_ITEMS.main).toBeDefined();
+      const kasirRoutes = KASIR_NAV_ITEMS.main.map((i) => i.route);
+      expect(kasirRoutes).toContain("/(kasir)/pos");
+      expect(kasirRoutes).toContain("/(kasir)/inventory");
     });
 
     it("merender brand title dan info user di drawer header", () => {
