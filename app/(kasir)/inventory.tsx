@@ -71,6 +71,7 @@ export default function KasirInventoryScreen() {
       const { data, error } = await supabase
         .from('inventory_items')
         .select('*')
+        .eq('is_deleted', false)
         .order('name', { ascending: true });
 
       if (error) throw error;

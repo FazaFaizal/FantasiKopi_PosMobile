@@ -11,7 +11,14 @@ import {
   SIDEBAR_NAV_ITEMS,
   KASIR_NAV_ITEMS,
 } from "../components/SidebarDrawer";
+import {
+  normalizeRoute,
+  isRouteActive,
+  resolveTabRouteName,
+  evaluateNavigationGuard,
+} from "../lib/navigation-logic";
 import { ScreenHeader } from "../components/ScreenHeader";
+import { FloatingTabBar } from "../components/FloatingNavbar";
 import {
   getDeviceType,
   getOrientation,
@@ -290,6 +297,201 @@ describe("Shared UI & Responsive Architecture (UI Components, Sidebar & Tablet L
       expect(html).toContain("Katalog Produk");
       expect(html).toContain("Kelola Menu");
       expect(html).toContain("menu-outline");
+    });
+
+    it("memvalidasi logika normalisasi dan pencocokan rute aktif (navigation-logic)", () => {
+      // 1. Normalisasi nama rute dengan group stripping
+      expect(normalizeRoute("/(admin)/dashboard")).toBe("/dashboard");
+      expect(normalizeRoute("/(kasir)/pos")).toBe("/pos");
+      expect(normalizeRoute("/dashboard/")).toBe("/dashboard");
+      expect(normalizeRoute("/(customer)/product?sort=asc")).toBe("/product");
+
+      // 2. Pencocokan rute aktif Admin & Kasir
+      expect(isRouteActive("/dashboard", "/(admin)/dashboard")).toBe(true);
+      expect(isRouteActive("/(admin)/dashboard", "/(admin)/dashboard")).toBe(true);
+      expect(isRouteActive("/product", "/(admin)/product")).toBe(true);
+      expect(isRouteActive("/pos", "/(kasir)/pos")).toBe(true);
+      expect(isRouteActive("/orders", "/(kasir)/orders")).toBe(true);
+
+      // 3. Menolak rute yang tidak cocok (bukan false positive)
+      expect(isRouteActive("/category", "/(admin)/product")).toBe(false);
+      expect(isRouteActive("/product-promo", "/(admin)/product")).toBe(false);
+
+      // 4. Mendukung sub-halaman hierarkis
+      expect(isRouteActive("/product/edit/10", "/(admin)/product")).toBe(true);
+
+      // 5. Ekstraksi nama tab
+      expect(resolveTabRouteName("/(admin)/dashboard")).toBe("dashboard");
+      expect(resolveTabRouteName("/(kasir)/pos")).toBe("pos");
+      expect(resolveTabRouteName("/(admin)/category")).toBe("category");
+    });
+
+    it("mengevaluasi aturan guard segmen rute dan RBAC secara tepat (evaluateNavigationGuard)", () => {
+      // 1. Belum siap (loading font / auth) -> allow tanpa redirect
+      expect(
+        evaluateNavigationGuard({
+          isReady: false,
+          session: null,
+          user: null,
+          segments: ["(admin)", "dashboard"],
+        })
+      ).toEqual({ action: "allow" });
+
+      // 2. Belum login: diarahkan ke login jika berada di luar login/register
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: null,
+          user: null,
+          segments: [],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(auth)/login" });
+
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: null,
+          user: null,
+          segments: ["(admin)", "dashboard"],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(auth)/login" });
+
+      // Belum login di login/register -> diizinkan
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: null,
+          user: null,
+          segments: ["(auth)", "login"],
+        })
+      ).toEqual({ action: "allow" });
+
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: null,
+          user: null,
+          segments: ["(auth)", "register"],
+        })
+      ).toEqual({ action: "allow" });
+
+      // 3. User Nonaktif: selalu diarahkan ke layar inactive kecuali jika sudah di layar inactive
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Nonaktif" },
+          segments: ["(auth)", "login"],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(auth)/inactive" });
+
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Nonaktif" },
+          segments: ["(auth)", "inactive"],
+        })
+      ).toEqual({ action: "allow" });
+
+      // 4. User Aktif di auth entry atau root: diarahkan ke dashboard role
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Admin", status: "Aktif" },
+          segments: ["(auth)", "login"],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(admin)/dashboard" });
+
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Aktif" },
+          segments: [],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(kasir)/pos" });
+
+      // 5. User di layar unauthorized: harus diizinkan tampil (mencegah redirect loop / flash)
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Aktif" },
+          segments: ["(auth)", "unauthorized"],
+        })
+      ).toEqual({ action: "allow" });
+
+      // 6. User mencoba mengakses grup role lain: diarahkan ke unauthorized
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Aktif" },
+          segments: ["(admin)", "dashboard"],
+        })
+      ).toEqual({ action: "redirect", targetHref: "/(auth)/unauthorized" });
+
+      // 7. User mengakses rute grup miliknya: diizinkan
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Kasir", status: "Aktif" },
+          segments: ["(kasir)", "pos"],
+        })
+      ).toEqual({ action: "allow" });
+
+      expect(
+        evaluateNavigationGuard({
+          isReady: true,
+          session: { user: {} },
+          user: { role: "Admin", status: "Aktif" },
+          segments: ["(admin)", "inventory"],
+        })
+      ).toEqual({ action: "allow" });
+    });
+
+    it("menyembunyikan FloatingTabBar saat layar aktif mengonfigurasi tabBarStyle display none", () => {
+      const mockState = {
+        index: 1,
+        routes: [
+          { key: "dashboard-key", name: "dashboard" },
+          { key: "category-key", name: "category" },
+        ],
+      };
+
+      const mockDescriptors = {
+        "dashboard-key": {
+          options: { title: "Dashboard" },
+        },
+        "category-key": {
+          options: {
+            title: "Kategori",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          },
+        },
+      };
+
+      // Saat di halaman category (index 1), FloatingTabBar mengembalikan null
+      const hiddenMarkup = renderToStaticMarkup(
+        <FloatingTabBar
+          state={mockState}
+          descriptors={mockDescriptors}
+        />
+      );
+      expect(hiddenMarkup).toBe("");
+
+      // Saat di halaman dashboard (index 0), FloatingTabBar merender pill capsule
+      const visibleMarkup = renderToStaticMarkup(
+        <FloatingTabBar
+          state={{ ...mockState, index: 0 }}
+          descriptors={mockDescriptors}
+        />
+      );
+      expect(visibleMarkup).not.toBe("");
     });
   });
 });

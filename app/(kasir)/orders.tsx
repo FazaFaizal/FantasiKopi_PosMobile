@@ -73,7 +73,8 @@ export default function KasirOrdersScreen() {
       const { data, error } = await supabase
         .from('orders')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(100);
 
       if (error) throw error;
       setOrders((data as unknown as OrderRecord[]) || []);
@@ -117,10 +118,11 @@ export default function KasirOrdersScreen() {
   const handleUpdateStatus = async (nextStatus: OrderStatus) => {
     if (!selectedOrder) return;
 
+    const userRole = (user?.role as 'Admin' | 'Kasir' | 'Customer') ?? 'Customer';
     const transitionCheck = canTransitionOrderStatus(
       selectedOrder.order_status,
       nextStatus,
-      (user?.role as any) || 'Kasir'
+      userRole
     );
 
     if (!transitionCheck.allowed) {
@@ -160,7 +162,8 @@ export default function KasirOrdersScreen() {
 
   const handleOpenCancelModal = () => {
     if (!selectedOrder) return;
-    const check = canCancelOrder(selectedOrder, (user?.role as any) || 'Kasir');
+    const userRole = (user?.role as 'Admin' | 'Kasir' | 'Customer') ?? 'Customer';
+    const check = canCancelOrder(selectedOrder, userRole);
     if (!check.canCancel) {
       Alert.alert('Tidak Dapat Dibatalkan', check.error || 'Pesanan tidak memenuhi syarat pembatalan.');
       return;
@@ -313,6 +316,7 @@ export default function KasirOrdersScreen() {
         >
           {[
             { id: 'all', label: 'Semua Status' },
+            { id: 'Pending', label: 'Menunggu' },
             { id: 'Processing', label: 'Diproses' },
             { id: 'Ready', label: 'Siap Disajikan' },
             { id: 'Completed', label: 'Selesai' },

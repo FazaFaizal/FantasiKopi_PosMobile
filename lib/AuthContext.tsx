@@ -36,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data);
       } else {
         console.error('User data not found in public.users', error);
+        setUser(null);
       }
     } catch (e) {
       console.error('Error fetching user', e);

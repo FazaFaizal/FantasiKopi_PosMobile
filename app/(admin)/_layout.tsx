@@ -50,22 +50,25 @@ export default function AdminLayout() {
         <Tabs.Screen
           name="category"
           options={{
-            href: null,
             title: "Kategori",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
           }}
         />
         <Tabs.Screen
           name="employee"
           options={{
-            href: null,
             title: "Karyawan",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
           }}
         />
         <Tabs.Screen
           name="user"
           options={{
-            href: null,
             title: "Akun User",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
           }}
         />
       </Tabs>
@@ -78,7 +81,7 @@ export default function AdminLayout() {
         onLogout={signOut}
         onNavigate={(route) => {
           setSidebarOpen(false);
-          router.push(route as never);
+          router.replace(route as never);
         }}
       />
     </AdminSidebarContext.Provider>

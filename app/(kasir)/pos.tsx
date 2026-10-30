@@ -1035,7 +1035,7 @@ export default function KasirPOS() {
               onPress={() => {
                 setReceiptModalVisible(false);
                 setCompletedOrder(null);
-                router.push('/(kasir)/orders' as never);
+                router.replace('/(kasir)/orders' as never);
               }}
               className="mt-2.5 py-2.5 items-center justify-center rounded-button border border-line bg-surface"
             >

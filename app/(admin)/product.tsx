@@ -24,21 +24,13 @@ import { useAdminSidebar } from "../../components/SidebarDrawer";
 import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
+import { formatRupiah } from "../../lib/formatters";
 
 type Product = Database["public"]["Tables"]["products"]["Row"];
 type Category = Database["public"]["Tables"]["categories"]["Row"];
 
 interface ProductWithCategory extends Product {
   category?: Category | null;
-}
-
-export function formatRupiah(amount: number): string {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
 }
 
 export default function AdminProductScreen() {

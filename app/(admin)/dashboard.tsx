@@ -200,7 +200,7 @@ export default function AdminDashboard() {
         {/* Stock Alert Warning Banner (if any low or out of stock items) */}
         {(stats.lowStockCount > 0 || stats.outOfStockCount > 0) && (
           <TouchableOpacity
-            onPress={() => router.push("/(admin)/inventory")}
+            onPress={() => router.replace("/(admin)/inventory")}
             activeOpacity={0.8}
             className="bg-amber-50 rounded-card p-4 border border-amber-200 mb-5 shadow-sm"
           >
@@ -234,7 +234,7 @@ export default function AdminDashboard() {
           {/* Card 1: Product Management */}
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={() => router.push("/(admin)/product")}
+            onPress={() => router.replace("/(admin)/product")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-3.5"
             style={isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined}
@@ -280,7 +280,7 @@ export default function AdminDashboard() {
           {/* Card 2: Category Management */}
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={() => router.push("/(admin)/category")}
+            onPress={() => router.replace("/(admin)/category")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-3.5"
             style={isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined}
@@ -317,7 +317,7 @@ export default function AdminDashboard() {
           {/* Card 3: Raw Material Inventory & Movements */}
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={() => router.push("/(admin)/inventory")}
+            onPress={() => router.replace("/(admin)/inventory")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-6"
             style={isTablet ? { width: isLandscape ? "31.8%" : "100%" } : undefined}
@@ -377,7 +377,7 @@ export default function AdminDashboard() {
           {/* Menu: Employee Management */}
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={() => router.push("/(admin)/employee")}
+            onPress={() => router.replace("/(admin)/employee")}
             activeOpacity={0.8}
             className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? 'mb-0' : 'mb-3.5'}`}
             style={isTablet ? { width: "48.5%" } : undefined}
@@ -418,7 +418,7 @@ export default function AdminDashboard() {
           {/* Menu: User Account Management */}
           <TouchableOpacity
             accessibilityRole="button"
-            onPress={() => router.push("/(admin)/user")}
+            onPress={() => router.replace("/(admin)/user")}
             activeOpacity={0.8}
             className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? 'mb-0' : 'mb-6'}`}
             style={isTablet ? { width: "48.5%" } : undefined}

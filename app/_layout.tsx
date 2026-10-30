@@ -1,6 +1,7 @@
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { AuthProvider, useAuth } from '../lib/AuthContext';
+import { evaluateNavigationGuard } from '../lib/navigation-logic';
 import { View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -24,60 +25,38 @@ function RootLayoutNav() {
   const isReady = !isLoading && (fontsLoaded || !!fontError);
 
   useEffect(() => {
-    if (!isReady) return;
+    const decision = evaluateNavigationGuard({
+      isReady,
+      session,
+      user,
+      segments: segments as string[],
+    });
 
-    const segList = segments as string[];
-    const inAuthGroup = segList[0] === '(auth)';
-    const isAtRoot = segList.length === 0 || segList[0] === 'index';
-
-    if (!session || !user) {
-      // Belum login
-      if (!inAuthGroup) {
-        router.replace('/(auth)/login');
-      }
-    } else if (user) {
-      // Sudah login, periksa status keaktifan akun
-      if (user.status === 'Nonaktif') {
-        if (!inAuthGroup) router.replace('/(auth)/inactive');
-        return;
-      }
-
-      // Arahkan ke rute default role jika berada di grup auth atau di root
-      if (inAuthGroup || isAtRoot) {
-        if (user.role === 'Admin') {
-          router.replace('/(admin)/dashboard');
-        } else if (user.role === 'Kasir') {
-          router.replace('/(kasir)/pos');
-        } else if (user.role === 'Customer') {
-          router.replace('/(customer)/product');
-        }
-      } else {
-        // Pembatasan akses antar role
-        const currentGroup = segList[0];
-        if (currentGroup === '(admin)' && user.role !== 'Admin') {
-          router.replace('/(auth)/unauthorized');
-        }
-        if (currentGroup === '(kasir)' && user.role !== 'Kasir') {
-          router.replace('/(auth)/unauthorized');
-        }
-        if (currentGroup === '(customer)' && user.role !== 'Customer') {
-          router.replace('/(auth)/unauthorized');
-        }
-      }
+    if (decision.action === 'redirect' && decision.targetHref) {
+      router.replace(decision.targetHref as never);
     }
   }, [session, user, isReady, segments, router]);
-
-  if (!isReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF7F5' }}>
-        <ActivityIndicator size="large" color="#D1001F" />
-      </View>
-    );
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFF7F5' }}>
       <Slot />
+      {!isReady && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: '#FFF7F5',
+            zIndex: 9999,
+          }}
+        >
+          <ActivityIndicator size="large" color="#D1001F" />
+        </View>
+      )}
     </View>
   );
 }

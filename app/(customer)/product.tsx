@@ -17,19 +17,11 @@ import { supabase } from "../../lib/supabase";
 import { Category, Product } from "../../types/database";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
+import { formatRupiah } from "../../lib/formatters";
 
 interface ProductWithCategory extends Product {
   category?: Category | null;
 }
-
-const formatRupiah = (val: number) => {
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(val);
-};
 
 export default function CustomerProduct() {
   const { signOut, user } = useAuth();
@@ -42,6 +34,7 @@ export default function CustomerProduct() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("all");
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   const fetchData = useCallback(async () => {
     try {
@@ -117,11 +110,14 @@ export default function CustomerProduct() {
       >
         {/* Product Image / Placeholder */}
         <View className="w-18 h-18 rounded-chip bg-primary/10 items-center justify-center mr-3.5 border border-line overflow-hidden">
-          {item.image ? (
+          {item.image && !failedImages[item.id] ? (
             <Image
               source={{ uri: item.image }}
               className="w-full h-full"
               resizeMode="cover"
+              onError={() =>
+                setFailedImages((prev) => ({ ...prev, [item.id]: true }))
+              }
             />
           ) : (
             <Ionicons

@@ -2,6 +2,7 @@
   "expo": {
     "name": "Fantasi_Kopi",
     "slug": "Fantasi_Kopi",
+    "scheme": "fantasi-kopi",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",

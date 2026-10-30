@@ -20,6 +20,7 @@ import Store from "lucide-react-native/icons/store";
 import Receipt from "lucide-react-native/icons/receipt";
 import type { LucideIcon } from "lucide-react-native";
 import { useResponsive } from "../hooks/useResponsive";
+import { isRouteActive } from "../lib/navigation-logic";
 
 export interface SidebarNavItem {
   id: string;
@@ -186,7 +187,10 @@ export function SidebarDrawer({
 
   const handleItemPress = (route: string) => {
     onClose();
-    onNavigate?.(route);
+    // Beri sedikit jeda mikro agar penutupan modal native selesai sebelum transisi rute diproses
+    setTimeout(() => {
+      onNavigate?.(route);
+    }, 50);
   };
 
   const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : "A";
@@ -271,7 +275,7 @@ export function SidebarDrawer({
               Fitur Utama
             </Text>
             {navItems.main.map((item) => {
-              const isActive = activeRoute.startsWith(item.route);
+              const isActive = isRouteActive(activeRoute, item.route);
               const Icon = item.icon;
 
               return (
@@ -281,7 +285,7 @@ export function SidebarDrawer({
                   accessibilityLabel={item.title}
                   accessibilityState={{ selected: isActive }}
                   onPress={() => handleItemPress(item.route)}
-                  className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border transition-all ${
+                  className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border ${
                     isActive
                       ? "bg-primary/10 border-primary/30"
                       : "bg-surface border-transparent"
@@ -320,7 +324,7 @@ export function SidebarDrawer({
                   Administrasi &amp; Master Data
                 </Text>
                 {navItems.management.map((item) => {
-                  const isActive = activeRoute.startsWith(item.route);
+                  const isActive = isRouteActive(activeRoute, item.route);
                   const Icon = item.icon;
 
                   return (
@@ -330,7 +334,7 @@ export function SidebarDrawer({
                       accessibilityLabel={item.title}
                       accessibilityState={{ selected: isActive }}
                       onPress={() => handleItemPress(item.route)}
-                      className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border transition-all ${
+                      className={`flex-row items-center px-3.5 py-3 rounded-card mb-1.5 border ${
                         isActive
                           ? "bg-primary/10 border-primary/30"
                           : "bg-surface border-transparent"

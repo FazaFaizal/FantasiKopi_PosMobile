@@ -55,7 +55,7 @@ export default function KasirLayout() {
         onLogout={signOut}
         onNavigate={(route) => {
           setSidebarOpen(false);
-          router.push(route as never);
+          router.replace(route as never);
         }}
       />
     </KasirSidebarContext.Provider>

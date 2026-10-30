@@ -216,6 +216,17 @@ export function FloatingTabBar({
   insets,
   variant = "light",
 }: FloatingTabBarProps) {
+  const currentRoute = state.routes[state.index];
+  const currentDescriptor = descriptors[currentRoute?.key];
+  const currentOptions = (currentDescriptor?.options || {}) as Record<string, unknown> & {
+    tabBarStyle?: { display?: string };
+  };
+
+  // Sembunyikan tab bar secara menyeluruh jika layar saat ini mengonfigurasi tabBarStyle display none
+  if (currentOptions.tabBarStyle?.display === "none") {
+    return null;
+  }
+
   const bottomOffset = Platform.OS === "ios" ? Math.max(insets?.bottom ?? 0, 16) : 20;
   const isDark = variant === "coffee-dark";
 
