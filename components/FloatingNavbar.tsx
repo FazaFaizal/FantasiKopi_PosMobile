@@ -193,7 +193,13 @@ const ROUTE_ICONS: Record<string, { icon: LucideIcon; fillActive?: boolean }> = 
   home: { icon: Home, fillActive: true },
 };
 
-export interface FloatingTabBarProps extends BottomTabBarProps {
+export interface FloatingTabBarProps {
+  state: any;
+  descriptors: any;
+  navigation?: any;
+  emitter?: any;
+  navigateToTab?: (routeKey: string) => void;
+  insets?: { top?: number; right?: number; bottom?: number; left?: number };
   variant?: NavbarVariant;
 }
 
@@ -205,6 +211,8 @@ export function FloatingTabBar({
   state,
   descriptors,
   navigation,
+  emitter,
+  navigateToTab,
   insets,
   variant = "light",
 }: FloatingTabBarProps) {
@@ -212,7 +220,7 @@ export function FloatingTabBar({
   const isDark = variant === "coffee-dark";
 
   // Filter out screens with href: null or display: none (hidden tabs)
-  const visibleRoutes = state.routes.filter((route) => {
+  const visibleRoutes = state.routes.filter((route: any) => {
     const descriptor = descriptors[route.key];
     const options = (descriptor?.options || {}) as Record<string, unknown> & {
       href?: string | null;
@@ -259,7 +267,7 @@ export function FloatingTabBar({
         }}
         className={isDark ? "bg-[#1E1113] border border-[#3D2024]" : "bg-surface border border-line"}
       >
-        {visibleRoutes.map((route) => {
+        {visibleRoutes.map((route: any) => {
           const isFocused = state.routes[state.index].key === route.key;
           const descriptor = descriptors[route.key];
           const options = (descriptor?.options || {}) as Record<string, unknown> & {
@@ -270,14 +278,26 @@ export function FloatingTabBar({
           const IconComponent = iconMeta.icon;
 
           const onPress = () => {
-            const event = navigation.emit({
-              type: "tabPress",
-              target: route.key,
-              canPreventDefault: true,
-            });
+            const event = emitter
+              ? emitter.emit({
+                  type: "tabPress",
+                  target: route.key,
+                  canPreventDefault: true,
+                })
+              : navigation?.emit
+              ? navigation.emit({
+                  type: "tabPress",
+                  target: route.key,
+                  canPreventDefault: true,
+                })
+              : null;
 
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
+            if (!isFocused && !event?.defaultPrevented) {
+              if (navigateToTab) {
+                navigateToTab(route.key);
+              } else if (navigation?.navigate) {
+                navigation.navigate(route.name);
+              }
             }
           };
 

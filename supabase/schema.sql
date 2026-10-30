@@ -102,8 +102,13 @@ CREATE TABLE IF NOT EXISTS public.orders (
     customer_name TEXT,                 -- Nama pelanggan (opsional)
     total_amount NUMERIC NOT NULL CHECK (total_amount >= 0),
     payment_method TEXT NOT NULL CHECK (payment_method IN ('Tunai', 'QRIS')),
-    payment_status TEXT NOT NULL DEFAULT 'Lunas' CHECK (payment_status IN ('Lunas', 'Batal')),
+    payment_status TEXT NOT NULL DEFAULT 'Lunas' CHECK (payment_status IN ('Pending', 'Paid', 'Lunas', 'Failed', 'Refunded', 'Batal')),
+    order_status TEXT NOT NULL DEFAULT 'Processing' CHECK (order_status IN ('Pending', 'Processing', 'Ready', 'Completed', 'Cancelled')),
+    order_type TEXT NOT NULL DEFAULT 'Dine In' CHECK (order_type IN ('Dine In', 'Take Away')),
     notes TEXT,
+    cancelled_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    cancelled_at TIMESTAMPTZ,
+    cancellation_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

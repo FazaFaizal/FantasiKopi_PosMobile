@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { router } from 'expo-router';
 import {
   View,
   Text,
@@ -60,6 +61,7 @@ export default function KasirPOS() {
   // State Keranjang Belanja & Checkout
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartModalVisible, setCartModalVisible] = useState(false);
+  const [orderType, setOrderType] = useState<'Dine In' | 'Take Away'>('Dine In');
   const [customerName, setCustomerName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Tunai' | 'QRIS'>('Tunai');
   const [cashGivenText, setCashGivenText] = useState('');
@@ -78,6 +80,8 @@ export default function KasirPOS() {
     cashierName: string;
     totalAmount: number;
     paymentMethod: 'Tunai' | 'QRIS';
+    orderType: 'Dine In' | 'Take Away';
+    orderStatus: 'Processing';
     cashGiven: number;
     change: number;
     items: CartItem[];
@@ -269,6 +273,8 @@ export default function KasirPOS() {
           total_amount: total,
           payment_method: paymentMethod,
           payment_status: 'Lunas',
+          order_status: 'Processing',
+          order_type: orderType,
           notes: paymentMethod === 'Tunai' ? `Bayar: ${formatRupiah(cashGivenNumber)}` : 'Pembayaran QRIS',
         })
         .select('id, created_at')
@@ -297,6 +303,8 @@ export default function KasirPOS() {
         cashierName: cashierIdentifier,
         totalAmount: total,
         paymentMethod,
+        orderType,
+        orderStatus: 'Processing',
         cashGiven: paymentMethod === 'Tunai' ? cashGivenNumber : total,
         change: paymentMethod === 'Tunai' ? cashCalculation.change : 0,
         items: [...cart],
@@ -370,8 +378,34 @@ export default function KasirPOS() {
         </View>
       )}
 
-      {/* Input Nama Pelanggan / Nomor Meja */}
+      {/* Input Tipe Pesanan & Nama Pelanggan / Nomor Meja */}
       <View className="p-3 bg-background border-b border-line">
+        <View className="flex-row items-center justify-between mb-2">
+          <Text className="font-heading-semibold text-text text-xs">Tipe Pesanan</Text>
+          <View className="flex-row bg-surface border border-line rounded-chip p-0.5">
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Pilih Dine In"
+              onPress={() => setOrderType('Dine In')}
+              className={`px-3 py-1 rounded-chip ${orderType === 'Dine In' ? 'bg-primary' : 'bg-transparent'}`}
+            >
+              <Text className={`text-[11px] font-heading-semibold ${orderType === 'Dine In' ? 'text-white' : 'text-muted'}`}>
+                Dine In
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Pilih Take Away"
+              onPress={() => setOrderType('Take Away')}
+              className={`px-3 py-1 rounded-chip ${orderType === 'Take Away' ? 'bg-primary' : 'bg-transparent'}`}
+            >
+              <Text className={`text-[11px] font-heading-semibold ${orderType === 'Take Away' ? 'text-white' : 'text-muted'}`}>
+                Take Away
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <Text className="font-heading-semibold text-text text-xs mb-1">Pelanggan / Nomor Meja</Text>
         <TextInput
           placeholder="Contoh: Meja 03 / Kak Sarah"
@@ -917,8 +951,16 @@ export default function KasirPOS() {
                 <View className="flex-row justify-between mb-1">
                   <Text className="font-body text-muted text-xs">Pelanggan</Text>
                   <Text className="font-body-medium text-text text-xs">
-                    {completedOrder.customerName}
+                    {completedOrder.customerName} ({completedOrder.orderType})
                   </Text>
+                </View>
+                <View className="flex-row justify-between mb-1">
+                  <Text className="font-body text-muted text-xs">Status Antrean</Text>
+                  <View className="bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                    <Text className="text-[10px] font-heading-semibold text-blue-700">
+                      Diproses ({completedOrder.orderStatus})
+                    </Text>
+                  </View>
                 </View>
                 <View className="flex-row justify-between mb-1">
                   <Text className="font-body text-muted text-xs">Kasir / Waktu</Text>
@@ -978,7 +1020,7 @@ export default function KasirPOS() {
               </ScrollView>
             )}
 
-            {/* Tombol Transaksi Baru */}
+            {/* Tombol Transaksi Baru & Lihat Riwayat */}
             <Button
               title="Transaksi Baru"
               icon={<Ionicons name="refresh" size={18} color="#FFFFFF" />}
@@ -987,6 +1029,20 @@ export default function KasirPOS() {
                 setCompletedOrder(null);
               }}
             />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Buka Riwayat Pesanan"
+              onPress={() => {
+                setReceiptModalVisible(false);
+                setCompletedOrder(null);
+                router.push('/(kasir)/orders' as never);
+              }}
+              className="mt-2.5 py-2.5 items-center justify-center rounded-button border border-line bg-surface"
+            >
+              <Text className="text-xs font-heading-semibold text-text">
+                Lihat di Riwayat Pesanan
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>

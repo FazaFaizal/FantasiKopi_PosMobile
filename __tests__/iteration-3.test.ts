@@ -395,6 +395,145 @@ describe("Iterasi 3 - Terminal POS Kasir & Transaksi Pemesanan (POS Terminal & O
       expect(updatedProduct.id).toBe(originalProduct.id);
     });
   });
+
+  // ============================================================================
+  // BAGIAN 3.7: SIKLUS STATUS ORDER & ROLE GUARD (PRD Section 17)
+  // ============================================================================
+  describe("3.7 Siklus Status Order & Role Guard (Order Status)", () => {
+    const { canTransitionOrderStatus } = require("../lib/order-logic");
+
+    it("mengizinkan alur normal: Pending -> Processing -> Ready -> Completed bagi Kasir & Admin", () => {
+      expect(canTransitionOrderStatus("Pending", "Processing", "Kasir").allowed).toBe(true);
+      expect(canTransitionOrderStatus("Processing", "Ready", "Kasir").allowed).toBe(true);
+      expect(canTransitionOrderStatus("Ready", "Completed", "Kasir").allowed).toBe(true);
+      expect(canTransitionOrderStatus("Processing", "Completed", "Admin").allowed).toBe(true);
+    });
+
+    it("menolak jika Customer mencoba mengubah status pesanan", () => {
+      const result = canTransitionOrderStatus("Processing", "Ready", "Customer");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("Customer tidak memiliki izin");
+    });
+
+    it("menolak perubahan status jika pesanan sudah Completed", () => {
+      const result = canTransitionOrderStatus("Completed", "Processing", "Kasir");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("sudah Completed");
+    });
+
+    it("menolak perubahan status jika pesanan sudah Cancelled", () => {
+      const result = canTransitionOrderStatus("Cancelled", "Processing", "Kasir");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("sudah dibatalkan");
+    });
+  });
+
+  // ============================================================================
+  // BAGIAN 3.8: ATURAN PEMBATALAN & REFUND PESANAN (PRD Section 17.1)
+  // ============================================================================
+  describe("3.8 Aturan Pembatalan & Refund Pesanan (Order Cancellation & Refund)", () => {
+    const {
+      canCancelOrder,
+      validateCancellationPayload,
+    } = require("../lib/order-logic");
+
+    it("mengizinkan pembatalan untuk status Pending, Processing, atau Ready", () => {
+      expect(canCancelOrder({ order_status: "Pending" }, "Kasir").canCancel).toBe(true);
+      expect(canCancelOrder({ order_status: "Processing" }, "Kasir").canCancel).toBe(true);
+      expect(canCancelOrder({ order_status: "Ready" }, "Admin").canCancel).toBe(true);
+    });
+
+    it("menolak pembatalan untuk pesanan yang sudah Completed", () => {
+      const result = canCancelOrder({ order_status: "Completed" }, "Kasir");
+      expect(result.canCancel).toBe(false);
+      expect(result.error).toContain("sudah Completed tidak dapat dibatalkan");
+    });
+
+    it("menolak pembatalan yang dilakukan oleh role Customer", () => {
+      const result = canCancelOrder({ order_status: "Processing" }, "Customer");
+      expect(result.canCancel).toBe(false);
+      expect(result.error).toContain("Hanya Admin dan Kasir");
+    });
+
+    it("memvalidasi alasan pembatalan (wajib diisi minimal 3 karakter)", () => {
+      expect(validateCancellationPayload("").isValid).toBe(false);
+      expect(validateCancellationPayload("  ").isValid).toBe(false);
+      expect(validateCancellationPayload("ab").isValid).toBe(false);
+      expect(validateCancellationPayload("Pelanggan salah pesan").isValid).toBe(true);
+    });
+  });
+
+  // ============================================================================
+  // BAGIAN 3.9: PEMFILTERAN RIWAYAT PESANAN KASIR (PRD Section 19)
+  // ============================================================================
+  describe("3.9 Pemfilteran & Tampilan Riwayat Transaksi Kasir", () => {
+    const {
+      filterOrderHistory,
+      getOrderStatusBadgeTone,
+    } = require("../lib/order-logic");
+
+    const mockOrders = [
+      {
+        id: "ord-1",
+        order_number: "ORD-20261024-0001",
+        customer_name: "Budi Santoso",
+        total_amount: 50000,
+        payment_method: "Tunai",
+        payment_status: "Lunas",
+        order_status: "Completed",
+        created_at: "2026-10-24T10:00:00Z",
+      },
+      {
+        id: "ord-2",
+        order_number: "ORD-20261024-0002",
+        customer_name: "Siti Rahma",
+        total_amount: 32000,
+        payment_method: "QRIS",
+        payment_status: "Lunas",
+        order_status: "Processing",
+        created_at: "2026-10-24T11:00:00Z",
+      },
+      {
+        id: "ord-3",
+        order_number: "ORD-20261020-0003",
+        customer_name: "Andi Wijaya",
+        total_amount: 45000,
+        payment_method: "Tunai",
+        payment_status: "Refunded",
+        order_status: "Cancelled",
+        created_at: "2026-10-20T08:00:00Z",
+      },
+    ];
+
+    it("memfilter riwayat berdasarkan status pesanan", () => {
+      const processingOnly = filterOrderHistory(mockOrders, {
+        statusFilter: "Processing",
+      });
+      expect(processingOnly).toHaveLength(1);
+      expect(processingOnly[0].order_number).toBe("ORD-20261024-0002");
+    });
+
+    it("memfilter riwayat berdasarkan pencarian teks (nomor order atau nama pelanggan)", () => {
+      const searchByName = filterOrderHistory(mockOrders, {
+        searchQuery: "siti",
+      });
+      expect(searchByName).toHaveLength(1);
+      expect(searchByName[0].customer_name).toBe("Siti Rahma");
+
+      const searchByNumber = filterOrderHistory(mockOrders, {
+        searchQuery: "0003",
+      });
+      expect(searchByNumber).toHaveLength(1);
+      expect(searchByNumber[0].id).toBe("ord-3");
+    });
+
+    it("memberikan tone badge yang tepat untuk setiap status", () => {
+      expect(getOrderStatusBadgeTone("Pending")).toBe("warning");
+      expect(getOrderStatusBadgeTone("Processing")).toBe("accent");
+      expect(getOrderStatusBadgeTone("Completed")).toBe("success");
+      expect(getOrderStatusBadgeTone("Cancelled")).toBe("danger");
+    });
+  });
 });
 
 

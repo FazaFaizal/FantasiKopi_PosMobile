@@ -33,6 +33,12 @@ export default function KasirLayout() {
           }}
         />
         <Tabs.Screen
+          name="orders"
+          options={{
+            title: "Riwayat Transaksi",
+          }}
+        />
+        <Tabs.Screen
           name="inventory"
           options={{
             title: "Bahan Baku",

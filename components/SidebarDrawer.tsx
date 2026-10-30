@@ -17,6 +17,7 @@ import UserCheck from "lucide-react-native/icons/user-check";
 import LogOut from "lucide-react-native/icons/log-out";
 import X from "lucide-react-native/icons/x";
 import Store from "lucide-react-native/icons/store";
+import Receipt from "lucide-react-native/icons/receipt";
 import type { LucideIcon } from "lucide-react-native";
 import { useResponsive } from "../hooks/useResponsive";
 
@@ -91,6 +92,13 @@ export const KASIR_NAV_ITEMS: {
       title: "Terminal POS",
       subtitle: "Katalog Menu & Transaksi Kasir",
       icon: Store,
+    },
+    {
+      id: "orders",
+      route: "/(kasir)/orders",
+      title: "Riwayat Transaksi",
+      subtitle: "Status Pesanan & Pembatalan",
+      icon: Receipt,
     },
     {
       id: "inventory",
