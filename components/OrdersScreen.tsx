@@ -13,6 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { ScreenHeader } from './ScreenHeader';
@@ -39,8 +40,12 @@ import {
   canCorrectPaymentMethod,
   PAYMENT_METHODS,
   PaymentMethod,
+  formatCountdown,
+  getPaymentTimeLeftMs,
+  isAwaitingCustomerPayment,
 } from '../lib/order-logic';
 import { useResponsive } from '../hooks/useResponsive';
+import { isHiddenFromKasir, isOnlineOrder } from '../lib/payment-gateway-logic';
 
 interface OrderItemDetail {
   id: string;
@@ -92,7 +97,8 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
 
   const loadPage = useCallback(
     async (before: string | null) => {
-      let query = supabase.from('orders').select('*');
+      // Pesanan QRIS online yang belum lunas belum perlu ditangani kasir.
+      let query = supabase.from('orders').select('*').or('payment_channel.eq.Kasir,payment_status.neq.Pending');
       const startISO = getOrderHistoryStartISO(dateFilter);
       if (startISO) query = query.gte('created_at', startISO);
       if (before) query = query.lt('created_at', before);
@@ -108,6 +114,9 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
   const fetchOrders = useCallback(async () => {
     try {
       setErrorMessage('');
+      // Batalkan dulu pesanan customer yang melewati batas bayar 15 menit
+      // (cadangan bila pg_cron belum aktif; gagal di sini tidak menghalangi daftar).
+      await supabase.rpc('expire_unpaid_orders');
       setOrders(await loadPage(null));
     } catch (err: any) {
       console.error('Error fetching orders:', err);
@@ -131,9 +140,49 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
     }
   };
 
+  // Muat ulang setiap kali halaman dibuka (tab tetap ter-mount di belakang).
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [fetchOrders])
+  );
+
+  // Realtime: pesanan customer baru & perubahan status langsung tampil tanpa tarik-refresh.
   useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+    const startISO = getOrderHistoryStartISO(dateFilter);
+    const channel = supabase
+      .channel(`staff-orders-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+        const row = payload.new as OrderRecord | null;
+        if (!row?.id) return;
+        if (isHiddenFromKasir(row)) return;
+        if (payload.eventType === 'INSERT') {
+          if (startISO && row.created_at < startISO) return;
+          setOrders((prev) => (prev.some((o) => o.id === row.id) ? prev : [row, ...prev]));
+        } else if (payload.eventType === 'UPDATE') {
+          setOrders((prev) => {
+            if (prev.some((o) => o.id === row.id)) return prev.map((o) => (o.id === row.id ? { ...o, ...row } : o));
+            // Pesanan online yang baru lunas muncul di daftar kasir.
+            if (startISO && row.created_at < startISO) return prev;
+            return [row, ...prev].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+          });
+          setSelectedOrder((prev) => (prev && prev.id === row.id ? { ...prev, ...row } : prev));
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [dateFilter]);
+
+  // Detik berjalan untuk hitung mundur batas bayar (hanya bila ada pesanan menunggu bayar).
+  const [now, setNow] = useState(() => new Date());
+  const hasAwaiting = orders.some((o) => isAwaitingCustomerPayment(o) && !!o.payment_due_at);
+  useEffect(() => {
+    if (!hasAwaiting) return;
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, [hasAwaiting]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -208,7 +257,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
   const handleConfirmPayment = () => {
     if (!selectedOrder) return;
     const userRole = (user?.role as 'Admin' | 'Kasir' | 'Customer') ?? 'Customer';
-    const check = canConfirmPayment(selectedOrder, userRole);
+    const check = canConfirmPayment(selectedOrder, userRole, new Date());
     if (!check.allowed) {
       Alert.alert('Tidak Dapat Dikonfirmasi', check.reason || 'Pembayaran tidak dapat dikonfirmasi.');
       return;
@@ -623,6 +672,9 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                     <Text className="font-body text-muted text-xs ml-1">
                       {item.payment_method}
                     </Text>
+                    {isOnlineOrder(item) && (
+                      <Text className="text-[10px] font-heading-semibold text-primary ml-1.5">(Online)</Text>
+                    )}
                     {item.payment_status === 'Refunded' && (
                       <Text className="text-[10px] font-heading-semibold text-rose-600 ml-1.5">
                         (Dikembalikan)
@@ -633,6 +685,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                         (Belum Bayar)
                       </Text>
                     )}
+                    <PaymentCountdown order={item} now={now} />
                   </View>
                   <Text className="font-heading-semibold text-primary text-sm">
                     {formatRupiah(item.total_amount)}
@@ -769,6 +822,12 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
             {/* Actions Footer */}
             {selectedOrder && (
               <View className="p-4 border-t border-line bg-surface flex-col gap-2">
+                {isAwaitingCustomerPayment(selectedOrder) && selectedOrder.payment_due_at && (
+                  <View className="flex-row items-center justify-center">
+                    <PaymentCountdown order={selectedOrder} now={now} long />
+                  </View>
+                )}
+
                 {/* Konfirmasi Pembayaran (order customer / belum lunas) */}
                 {selectedOrder.order_status !== 'Cancelled' &&
                   selectedOrder.order_status !== 'Completed' &&
@@ -948,5 +1007,28 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
         </KeyboardAvoidingView>
       </Modal>
     </View>
+  );
+}
+
+/** Sisa waktu bayar pesanan customer (batas 15 menit). */
+function PaymentCountdown({ order, now, long = false }: { order: OrderRecord; now: Date; long?: boolean }) {
+  const left = getPaymentTimeLeftMs(order, now);
+  if (left === null) return null;
+  const expired = left <= 0;
+  return (
+    <Text
+      accessibilityLiveRegion="polite"
+      className={`font-heading-semibold ${long ? 'text-xs' : 'text-[10px] ml-1.5'} ${
+        expired ? 'text-rose-600' : left < 3 * 60_000 ? 'text-amber-700' : 'text-muted'
+      }`}
+    >
+      {expired
+        ? long
+          ? 'Batas bayar habis — pesanan akan dibatalkan otomatis'
+          : 'Kedaluwarsa'
+        : long
+        ? `Sisa waktu bayar ${formatCountdown(left)}`
+        : `⏱ ${formatCountdown(left)}`}
+    </Text>
   );
 }

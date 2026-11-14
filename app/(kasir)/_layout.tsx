@@ -6,12 +6,16 @@ import {
   KASIR_NAV_ITEMS,
 } from "../../components/SidebarDrawer";
 import { useAuth } from "../../lib/AuthContext";
+import { IncomingOrderBanner } from "../../components/IncomingOrderBanner";
+import { useAwaitingCustomerOrders } from "../../hooks/useAwaitingCustomerOrders";
 
 export default function KasirLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  // Pesanan customer yang menunggu dibayar: banner realtime + badge menu Riwayat Pesanan.
+  const awaiting = useAwaitingCustomerOrders(!!user);
 
   return (
     <KasirSidebarContext.Provider
@@ -64,11 +68,18 @@ export default function KasirLayout() {
         user={user}
         activeRoute={pathname}
         navItems={KASIR_NAV_ITEMS}
+        badges={{ orders: awaiting.count }}
         onLogout={signOut}
         onNavigate={(route) => {
           setSidebarOpen(false);
           router.replace(route as never);
         }}
+      />
+
+      <IncomingOrderBanner
+        order={awaiting.latest}
+        onDismiss={awaiting.dismissLatest}
+        onOpen={() => router.replace("/(kasir)/orders" as never)}
       />
     </KasirSidebarContext.Provider>
   );

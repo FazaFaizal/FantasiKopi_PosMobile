@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,16 +7,18 @@ import {
   RefreshControl,
 } from "react-native";
 import { useAuth } from "../../lib/AuthContext";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { Badge } from "../../components/Badge";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { useAdminSidebar } from "../../components/SidebarDrawer";
-import { LoadingState } from "../../components/States";
+import { LoadingState, ErrorState } from "../../components/States";
+import { RecentActivityCard } from "../../components/RecentActivityCard";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
 import { formatRupiah } from "../../lib/formatters";
 import {
+  applySalesSummaryToDashboard,
   calculateTodayDashboardMetrics,
   getRecentOrders,
   TodayDashboardMetrics,
@@ -24,6 +26,7 @@ import {
 } from "../../lib/dashboard-logic";
 import { getBusinessDateString, getBusinessDayRangeISO } from "../../lib/timezone";
 import { getOrderStatusBadgeTone } from "../../lib/order-logic";
+import { mapSalesSummary, SalesSummaryRpc } from "../../lib/report-logic";
 
 interface MasterDataStats {
   totalEmployees: number;
@@ -76,55 +79,44 @@ export default function AdminDashboard() {
   const [recentOrders, setRecentOrders] = useState<DashboardOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Error ditampilkan apa adanya (bukan angka 0 yang terlihat seperti "tidak ada penjualan").
+  const [errorMessage, setErrorMessage] = useState("");
+  // Memicu muat ulang kartu aktivitas setiap kali dashboard dimuat ulang.
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
   const fetchDashboardData = useCallback(async () => {
+    setActivityRefreshKey((k) => k + 1);
     try {
-      // 1. Employees
-      const { data: employees } = await supabase
-        .from("employees")
-        .select("id, status");
-      const empList = employees || [];
-      const activeEmp = empList.filter((e) => e.status === "Aktif").length;
+      setErrorMessage("");
+      // Pesanan customer yang lewat batas bayar dibatalkan dulu agar angka "menunggu bayar" akurat.
+      await supabase.rpc("expire_unpaid_orders");
 
-      // 2. Users
-      const { data: users } = await supabase.from("users").select("id, role");
-      const userList = users || [];
-      const adminCount = userList.filter((u) => u.role === "Admin").length;
-      const kasirCount = userList.filter((u) => u.role === "Kasir").length;
-      const customerCount = userList.filter(
-        (u) => u.role === "Customer",
-      ).length;
-
-      // 3. Categories (active)
-      const { data: categories } = await supabase
-        .from("categories")
-        .select("id, status");
-      const catList = categories || [];
-      const activeCats = catList.filter((c) => c.status === "Aktif").length;
-
-      // 4. Products (active)
-      const { data: products } = await supabase
-        .from("products")
-        .select("id, is_active, status");
-      const prodList = (products || []).filter((p) => p.is_active);
-      const availCount = prodList.filter((p) => p.status === "Tersedia").length;
-      const unavailCount = prodList.filter(
-        (p) => p.status === "Tidak Tersedia",
-      ).length;
-
-      // 5. Inventory Items (hanya bahan aktif)
-      const { data: inventory } = await supabase
-        .from("inventory_items")
-        .select("id, name, is_active, current_stock, min_stock")
-        .eq("is_active", true);
-      const invList = inventory || [];
-
-      // 6. Orders hari ini saja (zona waktu bisnis) + 5 order terbaru untuk widget
       const today = getBusinessDateString();
       const { startISO, endISO } = getBusinessDayRangeISO(today, today);
       const orderColumns =
-        "id, order_number, order_status, payment_status, total_amount, customer_name, payment_method, created_at, items:order_items(product_name, quantity, subtotal)";
-      const [{ data: ordersData }, { data: recentData }] = await Promise.all([
+        "id, order_number, order_status, payment_status, total_amount, customer_name, payment_method, created_at, paid_at";
+
+      const [
+        employeesRes,
+        usersRes,
+        categoriesRes,
+        productsRes,
+        inventoryRes,
+        todayOrdersRes,
+        recentRes,
+        summaryRes,
+        awaitingRes,
+      ] = await Promise.all([
+        supabase.from("employees").select("id, status"),
+        supabase.from("users").select("id, role"),
+        supabase.from("categories").select("id, status"),
+        supabase.from("products").select("id, is_active, status"),
+        // Hanya bahan aktif
+        supabase
+          .from("inventory_items")
+          .select("id, name, is_active, current_stock, min_stock")
+          .eq("is_active", true),
+        // Order yang dibuat hari ini (zona waktu bisnis) untuk jumlah order & yang sedang berjalan
         supabase
           .from("orders")
           .select(orderColumns)
@@ -132,25 +124,51 @@ export default function AdminDashboard() {
           .lt("created_at", endISO)
           .order("created_at", { ascending: false }),
         supabase.from("orders").select(orderColumns).order("created_at", { ascending: false }).limit(5),
+        // Omzet, biaya & produk terlaris dihitung database — sama persis dengan halaman Laporan
+        supabase.rpc("get_sales_summary", { p_from: today, p_to: today }),
+        // Semua pesanan customer yang masih menunggu dibayar (bukan hanya hari ini)
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("order_status", "Pending")
+          .eq("payment_status", "Pending")
+          .eq("payment_channel", "Kasir"),
       ]);
-      const ordersList = (ordersData as unknown as DashboardOrder[]) || [];
+      for (const res of [
+        employeesRes,
+        usersRes,
+        categoriesRes,
+        productsRes,
+        inventoryRes,
+        todayOrdersRes,
+        recentRes,
+        summaryRes,
+        awaitingRes,
+      ]) {
+        if (res.error) throw res.error;
+      }
 
-      // 7. Expenses hari ini
-      const { data: expensesData } = await supabase
-        .from("expenses")
-        .select("id, description, amount, category, expense_date")
-        .eq("expense_date", today);
-      const expensesList = expensesData || [];
+      const empList = employeesRes.data || [];
+      const activeEmp = empList.filter((e) => e.status === "Aktif").length;
+      const userList = usersRes.data || [];
+      const adminCount = userList.filter((u) => u.role === "Admin").length;
+      const kasirCount = userList.filter((u) => u.role === "Kasir").length;
+      const customerCount = userList.filter((u) => u.role === "Customer").length;
+      const activeCats = (categoriesRes.data || []).filter((c) => c.status === "Aktif").length;
+      const prodList = (productsRes.data || []).filter((p) => p.is_active);
+      const availCount = prodList.filter((p) => p.status === "Tersedia").length;
+      const unavailCount = prodList.filter((p) => p.status === "Tidak Tersedia").length;
+      const invList = inventoryRes.data || [];
+      const ordersList = (todayOrdersRes.data as unknown as DashboardOrder[]) || [];
 
-      // Calculate Metrics using Pure Logic Layer (PRD Section 27)
-      const metrics = calculateTodayDashboardMetrics(
-        ordersList,
-        expensesList,
-        invList,
-        new Date(),
+      // Metrik lokal (jumlah order, status stok), lalu angka keuangan dari database (PRD 27).
+      const metrics = applySalesSummaryToDashboard(
+        calculateTodayDashboardMetrics(ordersList, [], invList, new Date()),
+        mapSalesSummary(summaryRes.data as unknown as SalesSummaryRpc | null),
+        { awaitingPaymentCount: awaitingRes.count ?? 0 }
       );
 
-      const latestOrders = getRecentOrders((recentData as unknown as DashboardOrder[]) || [], 5);
+      const latestOrders = getRecentOrders((recentRes.data as unknown as DashboardOrder[]) || [], 5);
 
       setMasterStats({
         totalEmployees: empList.length,
@@ -170,15 +188,19 @@ export default function AdminDashboard() {
       setRecentOrders(latestOrders);
     } catch (err: any) {
       console.error("Error fetching dashboard data:", err);
+      setErrorMessage(err?.message || "Gagal memuat data dashboard. Periksa koneksi internet Anda.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+  // Muat ulang setiap kali dashboard dibuka kembali.
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [fetchDashboardData])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -248,6 +270,13 @@ export default function AdminDashboard() {
             </View>
           </View>
         </View>
+
+        {errorMessage ? (
+          <ErrorState
+            message={`${errorMessage} Angka di bawah mungkin belum terbaru.`}
+            onRetry={onRefresh}
+          />
+        ) : null}
 
         {/* Stock Alert Warning Banner */}
         {(todayMetrics.lowStockCount > 0 ||
@@ -491,6 +520,9 @@ export default function AdminDashboard() {
             ))
           )}
         </View>
+
+        {/* SECTION 2b: AKTIVITAS OPERASIONAL PENTING (PRD Section 27) */}
+        <RecentActivityCard refreshKey={activityRefreshKey} />
 
         {/* SECTION 3: MODUL OPERASIONAL KEDAI */}
         <Text className="font-heading-semibold text-text text-lg mb-3">

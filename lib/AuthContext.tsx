@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { AppState } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { Database } from '../types/database';
@@ -10,6 +11,8 @@ interface AuthContextType {
   user: UserRow | null;
   isLoading: boolean;
   signOut: () => Promise<void>;
+  /** Muat ulang profil (role/status) dari database. */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -17,6 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
   signOut: async () => {},
+  refreshUser: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -34,9 +38,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
       if (data) {
         setUser(data);
-      } else {
+      } else if (error?.code === 'PGRST116') {
+        // Profil benar-benar tidak ada (mis. akun dihapus Admin).
         console.error('User data not found in public.users', error);
         setUser(null);
+      } else {
+        // Gangguan jaringan saat memuat ulang: pertahankan profil terakhir.
+        console.error('Error fetching user', error);
       }
     } catch (e) {
       console.error('Error fetching user', e);
@@ -69,12 +77,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchUserData]);
 
+  const sessionUserId = session?.user.id;
+  const refreshUser = useCallback(async () => {
+    if (sessionUserId) await fetchUserData(sessionUserId);
+  }, [sessionUserId, fetchUserData]);
+
+  // Akun yang dinonaktifkan / diubah role-nya oleh Admin langsung diarahkan ulang
+  // saat aplikasi kembali dibuka, tanpa harus keluar-masuk aplikasi.
+  useEffect(() => {
+    if (!sessionUserId) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshUser();
+    });
+    const timer = setInterval(refreshUser, 5 * 60_000);
+    return () => {
+      sub.remove();
+      clearInterval(timer);
+    };
+  }, [sessionUserId, refreshUser]);
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, isLoading, signOut }}>
+    <AuthContext.Provider value={{ session, user, isLoading, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

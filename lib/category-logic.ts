@@ -41,6 +41,25 @@ export function canDeleteCategory(
 }
 
 /**
+ * Kategori tidak dapat dinonaktifkan selama masih ada produk yang terhubung
+ * (keputusan 2026-11-14), agar tidak ada produk yang tampil di POS / menu customer
+ * dengan kategori nonaktif. Ditegakkan juga oleh trigger database.
+ */
+export function canDeactivateCategory(
+  categoryName: string,
+  productCount: number,
+): { allowed: boolean; reason?: string } {
+  const count = Number(productCount) || 0;
+  if (count > 0) {
+    return {
+      allowed: false,
+      reason: `Kategori "${categoryName}" masih dipakai ${count} produk. Pindahkan produk tersebut ke kategori lain atau hapus produknya terlebih dahulu.`,
+    };
+  }
+  return { allowed: true };
+}
+
+/**
  * Toggles category active status
  */
 export function toggleCategoryStatus(

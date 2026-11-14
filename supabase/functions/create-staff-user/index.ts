@@ -42,16 +42,24 @@ export default {
       return json({ error: 'Role akun internal harus Admin atau Kasir.' }, 400);
     }
 
-    if (employeeId) {
-      const { data: employee } = await ctx.supabaseAdmin
-        .from('employees')
-        .select('id, status')
-        .eq('id', employeeId)
-        .maybeSingle();
-      if (!employee) return json({ error: 'Data karyawan tidak ditemukan.' }, 400);
-      if (employee.status !== 'Aktif') {
-        return json({ error: 'Karyawan nonaktif tidak dapat diberi akun.' }, 400);
-      }
+    // Akun karyawan dibuat berdasarkan data karyawan: wajib, aktif, dan belum punya akun.
+    if (!employeeId) return json({ error: 'Pilih data karyawan untuk akun ini.' }, 400);
+    const { data: employee } = await ctx.supabaseAdmin
+      .from('employees')
+      .select('id, name, status')
+      .eq('id', employeeId)
+      .maybeSingle();
+    if (!employee) return json({ error: 'Data karyawan tidak ditemukan.' }, 400);
+    if (employee.status !== 'Aktif') {
+      return json({ error: 'Karyawan nonaktif tidak dapat diberi akun.' }, 400);
+    }
+    const { data: existing } = await ctx.supabaseAdmin
+      .from('users')
+      .select('id')
+      .eq('employee_id', employeeId)
+      .maybeSingle();
+    if (existing) {
+      return json({ error: `Karyawan ${employee.name} sudah memiliki akun. Satu karyawan hanya boleh memiliki satu akun.` }, 409);
     }
 
     // 3. Buat akun auth yang langsung terkonfirmasi (sesi Admin tidak tersentuh).
@@ -69,7 +77,7 @@ export default {
     // 4. Trigger handle_new_user membuat profil ber-role Customer; ubah ke role staf.
     const { error: updateErr } = await ctx.supabaseAdmin
       .from('users')
-      .update({ role, employee_id: employeeId, status: 'Aktif' })
+      .update({ role, employee_id: employeeId, status: 'Aktif', full_name: employee.name })
       .eq('id', created.user.id);
 
     if (updateErr) {

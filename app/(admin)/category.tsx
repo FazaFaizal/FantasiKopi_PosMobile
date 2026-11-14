@@ -22,7 +22,7 @@ import { ScreenHeader } from "../../components/ScreenHeader";
 import { useAdminSidebar } from "../../components/SidebarDrawer";
 import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { Ionicons } from "@expo/vector-icons";
-import { canDeleteCategory } from "../../lib/category-logic";
+import { canDeleteCategory, canDeactivateCategory } from "../../lib/category-logic";
 import { useResponsive } from "../../hooks/useResponsive";
 
 type Category = Database["public"]["Tables"]["categories"]["Row"];
@@ -63,11 +63,11 @@ export default function CategoryScreen() {
 
       if (catError) throw catError;
 
-      // 2. Fetch products to calculate count
-      const { data: prodData } = await supabase
+      // 2. Semua produk yang terhubung (dasar aturan hapus & nonaktifkan kategori)
+      const { data: prodData, error: prodError } = await supabase
         .from("products")
-        .select("id, category_id")
-        .eq("is_active", true);
+        .select("id, category_id");
+      if (prodError) throw prodError;
 
       const countMap: Record<string, number> = {};
       (prodData || []).forEach((p) => {
@@ -119,6 +119,16 @@ export default function CategoryScreen() {
       return;
     }
 
+    if (editingCategory && editingCategory.status === "Aktif" && status === "Nonaktif") {
+      const productCount =
+        categories.find((c) => c.id === editingCategory.id)?.product_count ?? 0;
+      const guard = canDeactivateCategory(editingCategory.name, productCount);
+      if (!guard.allowed) {
+        Alert.alert("Tidak Dapat Dinonaktifkan", guard.reason || "Kategori masih dipakai produk.");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
       if (editingCategory) {
@@ -159,14 +169,22 @@ export default function CategoryScreen() {
     }
   };
 
-  const handleToggleStatus = (cat: Category) => {
+  const handleToggleStatus = (cat: CategoryWithCount) => {
     const isAktif = cat.status === "Aktif";
     const newStatus = isAktif ? "Nonaktif" : "Aktif";
+
+    if (isAktif) {
+      const guard = canDeactivateCategory(cat.name, cat.product_count || 0);
+      if (!guard.allowed) {
+        Alert.alert("Tidak Dapat Dinonaktifkan", guard.reason || "Kategori masih dipakai produk.");
+        return;
+      }
+    }
 
     Alert.alert(
       isAktif ? "Nonaktifkan Kategori" : "Aktifkan Kategori",
       isAktif
-        ? `Nonaktifkan kategori "${cat.name}"? Kategori nonaktif tidak dapat digunakan untuk produk baru.`
+        ? `Nonaktifkan kategori "${cat.name}"? Kategori nonaktif disembunyikan dari POS & menu customer dan tidak dapat dipakai untuk produk.`
         : `Aktifkan kembali kategori "${cat.name}"?`,
       [
         { text: "Batal", style: "cancel" },

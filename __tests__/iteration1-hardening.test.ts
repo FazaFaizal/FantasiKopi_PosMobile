@@ -27,7 +27,7 @@ describe('Password minimal 8 karakter', () => {
 
   it('akun staf memakai aturan yang sama', () => {
     expect(STAFF_PASSWORD_MIN_LENGTH).toBe(PASSWORD_MIN_LENGTH);
-    const base = { email: 'kasir@fantasi.id', role: 'Kasir' as const, employeeId: null };
+    const base = { email: 'kasir@fantasi.id', role: 'Kasir' as const, employeeId: 'emp-1' };
     expect(validateStaffAccountPayload({ ...base, password: '1234567' }).errors.password).toBeDefined();
     expect(validateStaffAccountPayload({ ...base, password: '12345678' }).isValid).toBe(true);
   });

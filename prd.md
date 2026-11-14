@@ -207,7 +207,12 @@ User Account
 
 Tidak semua Employee harus memiliki User Account.
 
-Customer membuat User Account sendiri melalui fitur registrasi. User Account Customer tidak terhubung dengan Employee.
+Aturan relasi (ditegakkan aplikasi dan database):
+
+* **Akun karyawan** (Admin/Kasir) dibuat berdasarkan data Employee: setiap akun karyawan wajib terhubung ke tepat satu Employee, dan satu Employee maksimal memiliki satu akun.
+* Akun karyawan hanya dapat Aktif bila Employee-nya Aktif.
+
+Customer membuat User Account sendiri melalui fitur registrasi. User Account Customer **terpisah total** dari Employee: tidak dapat dihubungkan ke Employee dan tidak dapat diubah menjadi akun Admin/Kasir (atau sebaliknya). Nama yang diisi saat registrasi tersimpan di profil Customer.
 
 Fitur Guest (pemesanan tanpa akun) belum termasuk versi awal dan dapat dipertimbangkan pada pengembangan berikutnya.
 
@@ -378,7 +383,11 @@ Employee yang dinonaktifkan tidak dapat digunakan untuk akun internal baru.
 
 Ketika Employee dinonaktifkan, User Account yang terhubung dengannya ikut dinonaktifkan sehingga tidak dapat login.
 
-Employee tidak dapat dihapus permanen. Employee hanya dapat dinonaktifkan agar riwayat Order dan aktivitas sistem yang terkait tetap valid.
+Ketika Employee diaktifkan kembali, User Account-nya **tetap nonaktif** dan harus diaktifkan secara manual oleh Admin di menu Akun Pengguna.
+
+Employee tidak dapat dihapus permanen. Employee hanya dapat dinonaktifkan agar riwayat Order dan aktivitas sistem yang terkait tetap valid. Aturan ini juga ditegakkan oleh database.
+
+Data Employee mencakup tanggal mulai bekerja (opsional, tidak boleh di masa depan). Dari daftar Employee, Admin dapat langsung membuat akun login untuk Employee aktif yang belum memiliki akun.
 
 ---
 
@@ -415,6 +424,13 @@ Customer
 
 Role bersifat tetap dan bukan merupakan data yang dapat dibuat atau dihapus oleh Admin.
 
+Aturan perubahan User Account:
+
+* Akun karyawan dibuat dengan memilih Employee aktif yang belum memiliki akun (wajib).
+* Role akun karyawan dapat diubah antara Admin dan Kasir. Akun Customer tidak dapat diubah menjadi Admin/Kasir, dan sebaliknya.
+* Admin tidak dapat mengubah role atau menonaktifkan akunnya sendiri; perubahan tersebut dilakukan oleh Admin lain. Admin aktif terakhir juga tidak dapat dihapus, diturunkan, atau dinonaktifkan.
+* Perubahan status akun berlaku di aplikasi pengguna saat aplikasi dibuka kembali.
+
 ---
 
 # 9. Category Management
@@ -426,7 +442,7 @@ Admin dapat:
 * Melihat Category.
 * Menambahkan Category.
 * Mengubah Category.
-* Menonaktifkan Category.
+* Menonaktifkan Category apabila tidak memiliki Product yang terhubung.
 * Mengaktifkan kembali Category.
 * Menghapus Category apabila tidak memiliki Product yang terhubung.
 
@@ -437,6 +453,12 @@ Category memiliki:
 * Status.
 
 Category yang tidak aktif tidak dapat digunakan untuk Product baru.
+
+Aturan status Category:
+
+* Category tidak dapat dinonaktifkan selama masih ada Product yang terhubung. Admin harus memindahkan Product ke Category lain atau menghapus Product terlebih dahulu.
+* Product tidak dapat ditambahkan, dipindahkan, atau diaktifkan kembali ke Category yang nonaktif.
+* Dengan aturan ini, setiap Product yang tampil di POS dan menu Customer selalu berada di Category aktif. Aturan ditegakkan oleh aplikasi dan database.
 
 ---
 
@@ -550,7 +572,7 @@ Digunakan untuk mencatat penambahan stok bahan baku, misalnya:
 Stock In tidak otomatis tercatat sebagai Expense. Namun saat mencatat Stock In, Admin atau Kasir **dapat menandainya sebagai pembelian** dan mengisi total harga untuk bahan tersebut. Jika ditandai:
 
 * Sistem mencatat mutasi stok dan Expense sekaligus dalam satu transaksi (tidak mungkin hanya salah satu yang tersimpan).
-* Expense dibuat dengan kategori Raw Material, deskripsi otomatis "Pembelian <bahan> <jumlah> <satuan>", tanggal hari ini (WIB), dan terhubung ke Stock In tersebut.
+* Expense dibuat dengan kategori Raw Material, deskripsi otomatis "Pembelian <bahan> <jumlah> <satuan>", tanggal hari ini (WITA), dan terhubung ke Stock In tersebut.
 * Satu Stock In paling banyak memiliki satu Expense, sehingga biaya tidak tercatat ganda.
 * Stock In yang bukan pembelian (pemberian, retur, dan sebagainya) cukup tidak ditandai.
 
@@ -689,7 +711,7 @@ Koreksi data Payment:
 
 # 16. Payment
 
-> **Catatan:** Alur pembayaran Customer Ordering versi awal sudah ditetapkan (lihat "Pembayaran Customer" di bawah). Integrasi payment gateway tetap di luar scope.
+> **Catatan:** Customer dapat membayar dengan QRIS online melalui payment gateway Midtrans (lihat "Pembayaran QRIS Online" di bawah) atau membayar di kasir.
 
 Payment merupakan data pembayaran yang berkaitan dengan Order.
 
@@ -730,13 +752,28 @@ Hanya empat nilai ini yang disimpan di database (nilai lama `Lunas` dan `Batal` 
 | Refunded | Dikembalikan |
 | Failed | Gagal |
 
-Pembayaran Customer (tanpa payment gateway):
+Pembayaran Customer di kasir:
 
 1. Order Customer selalu dibuat dengan Payment Status **Pending**, baik Tunai maupun QRIS. Customer tidak dapat menandai pembayarannya sendiri sebagai Paid.
 2. Customer membayar di kasir (tunai, atau scan QRIS kedai dan menunjukkan bukti).
 3. Kasir memverifikasi (uang diterima / mutasi QRIS masuk di aplikasi merchant) lalu menekan **Konfirmasi Pembayaran**. Untuk order Pending, aksi ini sekaligus menerima order (Payment Status → Paid, Order Status → Processing).
+4. **Batas bayar 15 menit.** Order Customer harus dibayar di kasir paling lambat 15 menit setelah dibuat (`payment_due_at`, diisi database dan tidak dapat diperpanjang). Lewat batas itu:
+   * Order dibatalkan otomatis (Order Status Cancelled, Payment Status tetap Pending karena tidak ada uang yang berpindah) dengan alasan "Otomatis dibatalkan: tidak dibayar dalam 15 menit."
+   * Kasir tidak dapat lagi menerima pembayarannya (ditolak database). Bila Customer tetap ingin membeli, kasir membuat order baru lewat POS.
+   * Pembatalan otomatis dijalankan database tiap menit (pg_cron) dan juga setiap kali daftar pesanan dimuat.
+5. Customer melihat hitung mundur sisa waktu bayar; kasir melihat sisa waktu pada daftar pesanan.
+6. Saat Customer membuat order, kasir dan Admin langsung mendapat notifikasi di layar mana pun (realtime), dan menu Pesanan menampilkan jumlah order yang menunggu pembayaran.
 
-Integrasi dengan payment gateway tidak termasuk dalam versi awal kecuali ditentukan pada tahap implementasi berikutnya.
+Pembayaran QRIS Online (payment gateway Midtrans Snap):
+
+1. Saat checkout, Customer memilih **QRIS Online** atau bayar di kasir (Tunai / QRIS di kasir / Debit).
+2. Untuk QRIS Online, order dibuat dengan Payment Status Pending, lalu aplikasi menampilkan halaman pembayaran Midtrans (hanya QRIS) **di dalam aplikasi** pada layar "Bayar QRIS", lengkap dengan total dan hitung mundur. Batas bayar **3 menit**. Layar otomatis berganti menjadi "Pembayaran Berhasil" begitu order lunas, atau "Batas Waktu Habis" bila kedaluwarsa.
+3. Setelah Customer membayar, Midtrans mengirim notifikasi ke server (webhook). Server memverifikasi tanda tangan notifikasi dan memeriksa ulang status ke Midtrans, lalu menandai order **Paid** dan **Processing**.
+4. Order QRIS Online **tidak tampil di kasir sebelum lunas**. Setelah lunas, kasir mendapat notifikasi "Pesanan online lunas" dan langsung menyiapkan pesanan.
+5. Bila QR tidak dibayar sampai batas waktu, order dibatalkan otomatis (Payment Status Failed). Customer tidak dapat membatalkan order QRIS Online secara manual, untuk mencegah order dibatalkan tetapi QR tetap dibayar.
+6. Kasir tidak dapat menandai order QRIS Online sebagai lunas secara manual; hanya notifikasi Midtrans yang terverifikasi yang dapat melunasinya. Nominal dari Midtrans harus sama dengan total order.
+7. Pembayaran QRIS Online tidak masuk laci kas dan tidak memerlukan sif kasir yang terbuka. Refund order QRIS Online dilakukan lewat dashboard Midtrans.
+8. Server key Midtrans hanya disimpan di server (Supabase Secrets), tidak pernah di aplikasi. Versi tugas akhir memakai mode Sandbox Midtrans.
 
 ---
 
@@ -841,13 +878,13 @@ Setiap Expense memiliki penanda **Dibayar dari kas laci** (default: ya). Admin d
 
 Kasir dapat mencatat pengeluaran harian (misalnya es batu, gas, parkir) dengan aturan:
 
-* Tanggal selalu hari ini (WIB) dan dianggap dibayar dari kas laci.
+* Tanggal selalu hari ini (WITA) dan dianggap dibayar dari kas laci.
 * Tercatat atas nama Kasir yang mencatat.
 * Kasir hanya dapat melihat pengeluaran hari ini; mengubah dan menghapus tetap hanya Admin.
 
 ## 20.1 Kas Harian
 
-Kasir dan Admin dapat melihat rekap kas hari ini (WIB):
+Kasir dan Admin dapat melihat rekap kas hari ini (WITA). Penjualan masuk rekap pada hari pembayarannya diterima, sama dengan sif dan laporan:
 
 ```text
 Penjualan Tunai (order lunas & tidak Cancelled)
@@ -912,6 +949,8 @@ Laporan penjualan menghitung Order yang **sudah lunas (Paid) dan tidak Cancelled
 
 Alasan: penjualan diakui saat uang diterima. Jika omzet hanya dihitung dari status Completed, order yang sudah dibayar tetapi lupa ditutup kasir tidak masuk laporan sehingga omzet tercatat lebih kecil dari uang yang diterima.
 
+Tanggal penjualan adalah **waktu pembayaran diterima** (`paid_at`), bukan waktu order dibuat. Contoh: order dibuat 23:50 dan dibayar 00:10 keesokan harinya tercatat pada hari kedua, sama dengan rekap sif dan Kas Harian. Order lama yang belum memiliki `paid_at` memakai waktu order dibuat.
+
 Informasi minimal:
 
 * Total Order.
@@ -968,6 +1007,11 @@ Customer dapat:
 
 Product dengan status Tidak Tersedia tidak dapat dipesan.
 
+Aturan tampilan Product (berlaku di POS dan menu Customer):
+
+* Product **nonaktif** tidak ditampilkan sama sekali.
+* Product **Tidak Tersedia (habis)** tetap ditampilkan tetapi dalam keadaan disabled (tidak dapat ditambahkan ke Cart). Di POS, kasir mengubah status lewat toggle ketersediaan pada kartu Product.
+
 ---
 
 # 24. Customer Cart
@@ -982,6 +1026,8 @@ Customer dapat:
 * Mengosongkan Cart.
 
 Cart Customer harus tetap konsisten selama proses pemesanan.
+
+Setiap kali menu dimuat ulang, harga dan ketersediaan item di Cart disesuaikan dengan data terbaru dan Customer diberi tahu perubahannya. Total yang ditagih selalu dihitung database dari harga terbaru; bila berbeda dari Cart, konfirmasi pesanan menampilkan total akhirnya.
 
 ---
 
@@ -1015,6 +1061,14 @@ Checkout menampilkan:
 * Nama Customer (diambil dari User Account).
 * Nomor meja untuk Dine-in (opsional).
 * Payment Method.
+
+Batas pesanan Customer (bayar di kasir; POS kasir tidak dibatasi):
+
+* Satu akun Customer hanya boleh memiliki **1 pesanan yang belum dibayar** pada satu waktu. Pesanan baru dapat dibuat setelah pesanan tersebut dibayar, dibatalkan, atau kedaluwarsa (15 menit).
+* Jumlah per menu maksimal **99**, dan maksimal **10 menu berbeda** per pesanan.
+* Aturan ditegakkan oleh database: Customer hanya dapat membuat pesanan melalui fungsi `create_order` (tidak dapat menulis langsung ke tabel Order), sehingga batas tidak dapat dilewati.
+
+Product Detail: Customer **menahan** kartu menu untuk melihat detail Product (foto besar, nama, Category, harga, status ketersediaan, dan deskripsi lengkap). Detail langsung tertutup saat jari dilepas. Product yang habis tetap dapat dilihat detailnya tetapi tidak dapat dipesan.
 
 Alur Payment untuk Customer mengikuti "Pembayaran Customer" pada Section 16: order dibuat dengan Payment Status Pending dan baru diproses setelah kasir mengonfirmasi pembayaran.
 
@@ -1074,6 +1128,19 @@ Dashboard menampilkan ringkasan operasional seperti:
 * Aktivitas operasional penting.
 
 Dashboard harus menggunakan data aktual dari sistem.
+
+Implementasi:
+
+* Total Sales, Total Expense, Net Result, dan Product terlaris hari ini dihitung database dengan fungsi yang sama dengan halaman Laporan, sehingga angkanya selalu sama.
+* Jumlah order yang menunggu pembayaran mencakup seluruh order Customer yang belum dibayar (tidak hanya yang dibuat hari ini).
+* Dashboard dimuat ulang setiap kali dibuka. Jika data gagal dimuat, dashboard menampilkan pesan error dan tombol "Coba lagi", bukan angka 0.
+* **Aktivitas Operasional** (Recent Activity) menampilkan kejadian terbaru dari seluruh kedai, dengan filter Semua / Kas / Pesanan / Stok:
+  * Buka dan tutup sif, termasuk selisih kas (ditandai peringatan bila tidak sesuai).
+  * Pembatalan Order dan refund (beserta pelaku dan alasan), serta pembatalan otomatis karena tidak dibayar dalam 15 menit.
+  * Koreksi metode pembayaran oleh Admin (tercatat sebagai riwayat tersendiri).
+  * Stock In, Stock Out, dan Stock Adjustment.
+  * Pengeluaran (termasuk keterangan bila dibayar dari kas laci).
+  Mengetuk aktivitas membuka halaman terkait. Aktivitas hanya dapat dilihat oleh Admin.
 
 ---
 
@@ -1418,7 +1485,7 @@ Fitur berikut tidak termasuk dalam versi awal:
 * External digital receipt.
 * Advanced business analytics.
 * Delivery management.
-* Payment gateway integration.
+* Payment gateway selain QRIS Online Midtrans (kartu kredit, virtual account, e-wallet langsung).
 * Accounting system.
 * Multi-payment dalam satu Order.
 * Recipe dan pengurangan stok bahan baku otomatis berdasarkan penjualan.

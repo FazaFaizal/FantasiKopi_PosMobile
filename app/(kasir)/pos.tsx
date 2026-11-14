@@ -210,20 +210,8 @@ export default function KasirPOS() {
 
   // Handler Keranjang
   const handleAddToCart = (product: PosProduct) => {
-    if (product.status === 'Tidak Tersedia') {
-      Alert.alert(
-        'Produk Habis',
-        `${product.name} sedang ditandai Habis. Ketuk toggle status jika ingin mengaktifkannya kembali.`,
-        [
-          { text: 'Tutup', style: 'cancel' },
-          {
-            text: 'Jadikan Tersedia',
-            onPress: () => handleToggleProductStatus(product),
-          },
-        ]
-      );
-      return;
-    }
+    // Produk habis ter-disable di kartu; status hanya diubah lewat toggle di pojok kartu.
+    if (product.status === 'Tidak Tersedia') return;
     setCart((prevCart) => addToCart(prevCart, product));
   };
 
@@ -819,8 +807,12 @@ export default function KasirPOS() {
                     {/* Area Klik Menu: Menambah Item ke Keranjang */}
                     <TouchableOpacity
                       onPress={() => handleAddToCart(item)}
+                      disabled={isUnavailable}
+                      accessibilityRole="button"
+                      accessibilityLabel={isUnavailable ? `${item.name} habis` : `Tambah ${item.name} ke keranjang`}
+                      accessibilityState={{ disabled: isUnavailable }}
                       activeOpacity={0.7}
-                      className="flex-1 justify-between"
+                      className={`flex-1 justify-between ${isUnavailable ? 'opacity-60' : ''}`}
                     >
                       <View>
                         <Text

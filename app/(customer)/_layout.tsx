@@ -21,6 +21,12 @@ export default function CustomerLayout() {
         }}
       />
       <Stack.Screen
+        name="payment"
+        options={{
+          title: 'Bayar QRIS',
+        }}
+      />
+      <Stack.Screen
         name="profile"
         options={{
           title: 'Profil Saya',

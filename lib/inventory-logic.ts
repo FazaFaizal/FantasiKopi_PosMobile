@@ -135,7 +135,7 @@ export function validateMovementNotes(
 // Stock In sebagai pembelian (PRD Section 12.1 & 20, revisi #4)
 // Stock In dapat ditandai sebagai pembelian beserta total harga per bahan.
 // Fungsi DB `record_stock_in` menyimpan mutasi stok + expense (Raw Material,
-// tanggal hari ini WIB) dalam satu transaksi.
+// tanggal hari ini WITA) dalam satu transaksi.
 // ----------------------------------------------------------------------------
 
 /** Mengubah input nominal Rupiah ("Rp 90.000") menjadi angka (90000). */

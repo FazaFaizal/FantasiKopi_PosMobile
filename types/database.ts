@@ -51,6 +51,8 @@ export interface Database {
           role: 'Admin' | 'Kasir' | 'Customer';
           status: 'Aktif' | 'Nonaktif';
           employee_id: string | null;
+          /** Nama dari registrasi (customer) atau data karyawan (staf). */
+          full_name: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -60,6 +62,7 @@ export interface Database {
           role?: 'Admin' | 'Kasir' | 'Customer';
           status?: 'Aktif' | 'Nonaktif';
           employee_id?: string | null;
+          full_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -69,6 +72,7 @@ export interface Database {
           role?: 'Admin' | 'Kasir' | 'Customer';
           status?: 'Aktif' | 'Nonaktif';
           employee_id?: string | null;
+          full_name?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -238,6 +242,14 @@ export interface Database {
           cancelled_at: string | null;
           cancellation_reason: string | null;
           paid_at: string | null;
+          /** Batas bayar pesanan customer (created_at + 15 menit), diisi trigger database. */
+          payment_due_at: string | null;
+          payment_channel: 'Kasir' | 'Online';
+          gateway_status: string | null;
+          gateway_payment_type: string | null;
+          gateway_transaction_id: string | null;
+          gateway_redirect_url: string | null;
+          gateway_updated_at: string | null;
           paid_shift_id: string | null;
           refunded_shift_id: string | null;
           created_at: string;
@@ -260,6 +272,13 @@ export interface Database {
           cancelled_at?: string | null;
           cancellation_reason?: string | null;
           paid_at?: string | null;
+          payment_due_at?: string | null;
+          payment_channel?: 'Kasir' | 'Online';
+          gateway_status?: string | null;
+          gateway_payment_type?: string | null;
+          gateway_transaction_id?: string | null;
+          gateway_redirect_url?: string | null;
+          gateway_updated_at?: string | null;
           paid_shift_id?: string | null;
           refunded_shift_id?: string | null;
           created_at?: string;
@@ -281,6 +300,13 @@ export interface Database {
           cancelled_at?: string | null;
           cancellation_reason?: string | null;
           paid_at?: string | null;
+          payment_due_at?: string | null;
+          payment_channel?: 'Kasir' | 'Online';
+          gateway_status?: string | null;
+          gateway_payment_type?: string | null;
+          gateway_transaction_id?: string | null;
+          gateway_redirect_url?: string | null;
+          gateway_updated_at?: string | null;
           paid_shift_id?: string | null;
           refunded_shift_id?: string | null;
           created_at?: string;
@@ -423,6 +449,7 @@ export interface Database {
           p_order_type: 'Dine In' | 'Take Away';
           p_payment_method: 'Tunai' | 'QRIS' | 'Debit';
           p_notes?: string | null;
+          p_payment_channel?: 'Kasir' | 'Online';
         };
         Returns: {
           id: string;
@@ -431,7 +458,18 @@ export interface Database {
           order_status: string;
           payment_status: string;
           created_at: string;
+          payment_due_at: string | null;
+          payment_channel: 'Kasir' | 'Online';
         };
+      };
+      expire_unpaid_orders: {
+        Args: Record<PropertyKey, never>;
+        Returns: number;
+      };
+      get_recent_activity: {
+        Args: { p_limit?: number; p_category?: string | null };
+        /** Array baris aktivitas (lib/activity-logic.ts → ActivityRow). */
+        Returns: unknown;
       };
       cancel_my_order: {
         Args: { p_order_id: string; p_reason: string };

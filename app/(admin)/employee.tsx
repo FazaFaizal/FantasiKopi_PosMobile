@@ -23,13 +23,26 @@ import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { Ionicons } from '@expo/vector-icons';
 import { useResponsive } from '../../hooks/useResponsive';
+import { useRouter } from 'expo-router';
+import { validateEmployeeInput, getEmployeeStatusChangeMessage, EmployeeInputErrors } from '../../lib/employee-logic';
 
 type Employee = Database['public']['Tables']['employees']['Row'];
+
+interface LinkedAccount {
+  id: string;
+  email: string;
+  role: 'Admin' | 'Kasir' | 'Customer';
+  status: 'Aktif' | 'Nonaktif';
+  employee_id: string | null;
+}
 
 export default function EmployeeScreen() {
   const { openSidebar } = useAdminSidebar();
   const { isTablet, columns } = useResponsive();
+  const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // Akun login per karyawan (satu karyawan maksimal satu akun)
+  const [accounts, setAccounts] = useState<Record<string, LinkedAccount>>({});
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,20 +58,29 @@ export default function EmployeeScreen() {
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [position, setPosition] = useState('');
+  const [startDate, setStartDate] = useState('');
   const [status, setStatus] = useState<'Aktif' | 'Nonaktif'>('Aktif');
-  const [nameError, setNameError] = useState('');
+  const [formErrors, setFormErrors] = useState<EmployeeInputErrors>({});
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
     setErrorMessage('');
     try {
-      const { data, error } = await supabase
-        .from('employees')
-        .select('*')
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      setEmployees(data || []);
+      const [empRes, accRes] = await Promise.all([
+        supabase.from('employees').select('*').order('name', { ascending: true }),
+        supabase
+          .from('users')
+          .select('id, email, role, status, employee_id')
+          .not('employee_id', 'is', null),
+      ]);
+      if (empRes.error) throw empRes.error;
+      if (accRes.error) throw accRes.error;
+      setEmployees(empRes.data || []);
+      const map: Record<string, LinkedAccount> = {};
+      for (const acc of (accRes.data as LinkedAccount[]) || []) {
+        if (acc.employee_id) map[acc.employee_id] = acc;
+      }
+      setAccounts(map);
     } catch (e: any) {
       setErrorMessage(e?.message || 'Gagal memuat data karyawan dari server.');
     } finally {
@@ -76,8 +98,9 @@ export default function EmployeeScreen() {
     setPhone('');
     setEmail('');
     setPosition('');
+    setStartDate('');
     setStatus('Aktif');
-    setNameError('');
+    setFormErrors({});
     setModalVisible(true);
   };
 
@@ -87,49 +110,33 @@ export default function EmployeeScreen() {
     setPhone(emp.phone || '');
     setEmail(emp.email || '');
     setPosition(emp.position || '');
+    setStartDate(emp.start_date || '');
     setStatus(emp.status);
-    setNameError('');
+    setFormErrors({});
     setModalVisible(true);
   };
 
-  const handleSave = async () => {
-    setNameError('');
+  const saveEmployee = async () => {
     const cleanName = name.trim();
-    if (!cleanName) {
-      setNameError('Nama lengkap karyawan wajib diisi');
-      return;
-    }
-
     setSubmitting(true);
     try {
+      const payload = {
+        name: cleanName,
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        position: position.trim() || null,
+        start_date: startDate.trim() || null,
+        status: status,
+      };
       if (editingEmployee) {
-        // UPDATE
         const { error } = await supabase
           .from('employees')
-          .update({
-            name: cleanName,
-            phone: phone.trim() || null,
-            email: email.trim() || null,
-            position: position.trim() || null,
-            status: status,
-            updated_at: new Date().toISOString(),
-          })
+          .update({ ...payload, updated_at: new Date().toISOString() })
           .eq('id', editingEmployee.id);
-
         if (error) throw error;
         Alert.alert('Sukses', 'Data karyawan berhasil diperbarui.');
       } else {
-        // INSERT
-        const { error } = await supabase
-          .from('employees')
-          .insert({
-            name: cleanName,
-            phone: phone.trim() || null,
-            email: email.trim() || null,
-            position: position.trim() || null,
-            status: status,
-          });
-
+        const { error } = await supabase.from('employees').insert(payload);
         if (error) throw error;
         Alert.alert('Sukses', 'Karyawan baru berhasil ditambahkan.');
       }
@@ -143,15 +150,33 @@ export default function EmployeeScreen() {
     }
   };
 
+  const handleSave = () => {
+    const check = validateEmployeeInput({ name, phone, email, startDate });
+    setFormErrors(check.errors);
+    if (!check.isValid) return;
+
+    // Menonaktifkan lewat form tetap memberi peringatan yang sama dengan tombol status.
+    if (editingEmployee && editingEmployee.status === 'Aktif' && status === 'Nonaktif') {
+      Alert.alert(
+        'Nonaktifkan Karyawan',
+        getEmployeeStatusChangeMessage(editingEmployee.name, 'Nonaktif', accounts[editingEmployee.id] ? 1 : 0),
+        [
+          { text: 'Batal', style: 'cancel' },
+          { text: 'Nonaktifkan & Simpan', style: 'destructive', onPress: saveEmployee },
+        ]
+      );
+      return;
+    }
+    saveEmployee();
+  };
+
   const handleToggleStatus = (emp: Employee) => {
     const isActivating = emp.status === 'Nonaktif';
     const newStatus = isActivating ? 'Aktif' : 'Nonaktif';
 
     Alert.alert(
       isActivating ? 'Aktifkan Kembali Karyawan' : 'Nonaktifkan Karyawan',
-      isActivating
-        ? `Aktifkan kembali "${emp.name}"? Staf akan kembali dapat bertugas dan dihubungkan ke akun login.`
-        : `Nonaktifkan "${emp.name}"? Sesuai aturan sistem, akun login yang terhubung ke karyawan ini juga akan otomatis dinonaktifkan.`,
+      getEmployeeStatusChangeMessage(emp.name, newStatus, accounts[emp.id] ? 1 : 0),
       [
         { text: 'Batal', style: 'cancel' },
         {
@@ -178,34 +203,6 @@ export default function EmployeeScreen() {
     );
   };
 
-  const handleDelete = (emp: Employee) => {
-    Alert.alert(
-      'Konfirmasi Hapus Data',
-      `Hapus data karyawan "${emp.name}"? Relasi akun pengguna terkait akan dilepaskan.\n\nCatatan: Sesuai aturan PRD, karyawan operasional disarankan untuk dinonaktifkan daripada dihapus permanen.`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Hapus Permanen',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('employees')
-                .delete()
-                .eq('id', emp.id);
-
-              if (error) throw error;
-              Alert.alert('Sukses', 'Data karyawan telah dihapus.');
-              fetchEmployees();
-            } catch (err: any) {
-              Alert.alert('Gagal Menghapus', err?.message || 'Tidak dapat menghapus data karyawan.');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const filteredEmployees = employees.filter((e) => {
     if (statusFilter !== 'Semua' && e.status !== statusFilter) return false;
     const q = searchQuery.toLowerCase().trim();
@@ -213,13 +210,15 @@ export default function EmployeeScreen() {
     return (
       e.name.toLowerCase().includes(q) ||
       (e.position && e.position.toLowerCase().includes(q)) ||
-      (e.phone && e.phone.includes(q))
+      (e.phone && e.phone.includes(q)) ||
+      (e.email && e.email.toLowerCase().includes(q))
     );
   });
 
   const renderItem = ({ item }: { item: Employee }) => {
     const initial = item.name.charAt(0).toUpperCase();
     const isAktif = item.status === 'Aktif';
+    const account = accounts[item.id];
 
     return (
       <View
@@ -257,6 +256,35 @@ export default function EmployeeScreen() {
           </View>
         </View>
 
+        {/* Akun login karyawan */}
+        <View className="flex-row items-center mb-3">
+          <Ionicons
+            name={account ? 'key-outline' : 'key'}
+            size={14}
+            color={account ? '#166534' : '#9CA3AF'}
+          />
+          <Text className="font-body text-muted text-xs ml-1.5 flex-1" numberOfLines={1}>
+            {account
+              ? `Akun: ${account.email} · ${account.role} · ${account.status}`
+              : item.start_date
+              ? `Belum punya akun · Mulai bekerja ${item.start_date}`
+              : 'Belum punya akun login'}
+          </Text>
+          {!account && isAktif && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Buat akun login untuk ${item.name}`}
+              onPress={() =>
+                router.push({ pathname: '/(admin)/user', params: { employeeId: item.id } })
+              }
+              className="min-h-11 px-3 rounded-button bg-primary/10 border border-primary/30 flex-row items-center"
+            >
+              <Ionicons name="person-add-outline" size={14} color="#D1001F" />
+              <Text className="font-body-medium text-primary text-xs ml-1">Buat Akun Login</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* Action Row */}
         <View className="flex-row justify-end gap-2 pt-2.5 border-t border-line items-center">
           <TouchableOpacity
@@ -291,14 +319,6 @@ export default function EmployeeScreen() {
             <Text className="font-body-medium text-text text-xs ml-1.5">Edit Data</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={`Hapus karyawan ${item.name}`}
-            onPress={() => handleDelete(item)}
-            className="min-h-11 px-2.5 py-2 rounded-button bg-danger-soft border border-line flex-row items-center"
-          >
-            <Ionicons name="trash-outline" size={15} color="#991B1B" />
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -321,7 +341,7 @@ export default function EmployeeScreen() {
           <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
-              placeholder="Cari nama, jabatan, nomor..."
+              placeholder="Cari nama, jabatan, nomor, email..."
               placeholderTextColor="#6B7280"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -458,9 +478,9 @@ export default function EmployeeScreen() {
                   value={name}
                   onChangeText={(t) => {
                     setName(t);
-                    if (nameError) setNameError('');
+                    if (formErrors.name) setFormErrors((p) => ({ ...p, name: undefined }));
                   }}
-                  error={nameError}
+                  error={formErrors.name}
                   leftIcon={<Ionicons name="person-outline" size={18} color="#6B7280" />}
                 />
 
@@ -476,7 +496,11 @@ export default function EmployeeScreen() {
                   label="Nomor Telepon"
                   placeholder="Contoh: 081234567890"
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(t) => {
+                    setPhone(t);
+                    if (formErrors.phone) setFormErrors((p) => ({ ...p, phone: undefined }));
+                  }}
+                  error={formErrors.phone}
                   keyboardType="phone-pad"
                   leftIcon={<Ionicons name="call-outline" size={18} color="#6B7280" />}
                 />
@@ -485,10 +509,28 @@ export default function EmployeeScreen() {
                   label="Alamat Email Kontak"
                   placeholder="nama@email.com"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(t) => {
+                    setEmail(t);
+                    if (formErrors.email) setFormErrors((p) => ({ ...p, email: undefined }));
+                  }}
+                  error={formErrors.email}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   leftIcon={<Ionicons name="mail-outline" size={18} color="#6B7280" />}
+                />
+
+                <Input
+                  label="Tanggal Mulai Bekerja"
+                  placeholder="YYYY-MM-DD, contoh: 2026-01-15"
+                  value={startDate}
+                  onChangeText={(t) => {
+                    setStartDate(t);
+                    if (formErrors.startDate) setFormErrors((p) => ({ ...p, startDate: undefined }));
+                  }}
+                  error={formErrors.startDate}
+                  keyboardType="numbers-and-punctuation"
+                  autoCapitalize="none"
+                  leftIcon={<Ionicons name="calendar-outline" size={18} color="#6B7280" />}
                 />
 
                 <ChoiceGroup
@@ -503,7 +545,7 @@ export default function EmployeeScreen() {
 
                 <View className="bg-background rounded-chip p-3 mb-4 border border-line">
                   <Text className="font-body text-muted text-xs leading-4">
-                    Perhatian: Menetapkan status Nonaktif akan menonaktifkan akun login pengguna yang terhubung ke karyawan ini.
+                    Perhatian: status Nonaktif ikut menonaktifkan akun login karyawan ini. Data karyawan tidak dapat dihapus; nonaktifkan bila karyawan sudah tidak bekerja.
                   </Text>
                 </View>
 

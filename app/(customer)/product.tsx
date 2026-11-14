@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -12,10 +12,11 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
 } from "react-native";
 import { Badge } from "../../components/Badge";
 import { ScreenHeader } from "../../components/ScreenHeader";
-import { LoadingState, EmptyState } from "../../components/States";
+import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { useAuth } from "../../lib/AuthContext";
 import { supabase } from "../../lib/supabase";
 import { Category, Product } from "../../types/database";
@@ -27,9 +28,25 @@ import {
   CustomerCartItem,
   canAddProductToCustomerCart,
   validateCustomerCheckoutPayload,
+  syncCartWithProducts,
+  getServerTotalNotice,
+  getProductDetailView,
+  checkCustomerCartChange,
+  findBlockingUnpaidOrder,
+  CUSTOMER_MAX_UNPAID_ORDERS,
 } from "../../lib/customer-order-logic";
 import { calculateCartTotals, buildCreateOrderParams, CreatedOrder } from "../../lib/pos-logic";
-import { PAYMENT_METHODS, PaymentMethod, getPaymentMethodMeta } from "../../lib/order-logic";
+import {
+  CUSTOMER_PAYMENT_TIMEOUT_MINUTES,
+  ONLINE_PAYMENT_TIMEOUT_MINUTES,
+  OrderRecord,
+} from "../../lib/order-logic";
+import {
+  CUSTOMER_PAYMENT_OPTIONS,
+  CustomerPaymentOption,
+  getCustomerPaymentOption,
+} from "../../lib/payment-gateway-logic";
+import { openOnlinePayment } from "../../lib/online-payment";
 
 interface ProductWithCategory extends Product {
   category?: Category | null;
@@ -44,10 +61,13 @@ export default function CustomerProduct() {
   const [products, setProducts] = useState<ProductWithCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [menuError, setMenuError] = useState("");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("all");
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  // Detail menu yang sedang ditahan (tampil selama jari menekan kartu)
+  const [peekProduct, setPeekProduct] = useState<ProductWithCategory | null>(null);
 
   // Cart & Checkout States
   const [cart, setCart] = useState<CustomerCartItem[]>([]);
@@ -65,11 +85,38 @@ export default function CustomerProduct() {
   const [customerName, setCustomerName] = useState(
     user?.email?.split("@")[0] || "Pelanggan"
   );
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("QRIS");
+  // Pilihan bayar: QRIS online (Midtrans) atau bayar di kasir (Tunai / QRIS / Debit).
+  const [paymentOptionKey, setPaymentOptionKey] = useState<CustomerPaymentOption["key"]>("online_qris");
+  const paymentOption = getCustomerPaymentOption(paymentOptionKey);
+  const paymentMethod = paymentOption.method;
   const [orderNotes, setOrderNotes] = useState("");
+
+  // Keranjang terbaru untuk sinkronisasi setelah menu dimuat ulang.
+  const cartRef = useRef<CustomerCartItem[]>([]);
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
+
+  // Pesanan yang belum dibayar (maks. 1 per customer; ditegakkan juga oleh create_order).
+  const [blockingOrder, setBlockingOrder] = useState<Pick<OrderRecord, "order_number"> | null>(null);
+  const userId = user?.id;
+  const refreshBlockingOrder = useCallback(async () => {
+    if (!userId) return null;
+    const { data, error } = await supabase
+      .from("orders")
+      .select("order_number, order_status, payment_status, payment_due_at")
+      .eq("user_id", userId)
+      .eq("order_status", "Pending")
+      .eq("payment_status", "Pending");
+    if (error) return null; // database tetap menolak bila memang masih ada pesanan
+    const found = findBlockingUnpaidOrder((data as OrderRecord[]) || []);
+    setBlockingOrder(found);
+    return found;
+  }, [userId]);
 
   const fetchData = useCallback(async () => {
     try {
+      setMenuError("");
       // 1. Fetch active categories
       const { data: catData, error: catError } = await supabase
         .from("categories")
@@ -80,16 +127,26 @@ export default function CustomerProduct() {
       if (catError) throw catError;
       setCategories(catData || []);
 
-      // 2. Fetch active products with category
+      // 2. Produk aktif saja (nonaktif tidak ditampilkan; produk habis tetap tampil tapi tidak bisa dipesan)
       const { data: prodData, error: prodError } = await supabase
         .from("products")
         .select("*, category:categories(*)")
+        .eq("is_active", true)
         .order("name", { ascending: true });
 
       if (prodError) throw prodError;
-      setProducts((prodData as ProductWithCategory[]) || []);
+      const latest = (prodData as ProductWithCategory[]) || [];
+      setProducts(latest);
+
+      // Harga & ketersediaan di keranjang mengikuti menu terbaru (database menagih harga terbaru).
+      const synced = syncCartWithProducts(cartRef.current, latest);
+      if (synced.changes.length > 0) {
+        setCart(synced.cart);
+        Alert.alert("Keranjang Diperbarui", synced.changes.join("\n"));
+      }
     } catch (err: any) {
       console.error("Error fetching customer menu:", err);
+      setMenuError(err?.message || "Gagal memuat menu. Periksa koneksi internet Anda.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -107,6 +164,7 @@ export default function CustomerProduct() {
 
   const filteredProducts = useMemo(() => {
     return products.filter((item) => {
+      if (item.is_active === false) return false;
       const matchSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (item.description &&
@@ -146,6 +204,12 @@ export default function CustomerProduct() {
       return;
     }
 
+    const limit = checkCustomerCartChange(cart, selectedProduct.id, 1);
+    if (!limit.allowed) {
+      Alert.alert("Batas Pesanan", limit.reason || "Batas pesanan tercapai.");
+      return;
+    }
+
     const cleanNote = itemNoteInput.trim();
     const existingIndex = cart.findIndex(
       (c) => c.productId === selectedProduct.id && (c.notes || "") === cleanNote
@@ -179,6 +243,13 @@ export default function CustomerProduct() {
   };
 
   const handleUpdateQuantity = (productId: string, notes: string | undefined, delta: number) => {
+    if (delta > 0) {
+      const limit = checkCustomerCartChange(cart, productId, delta);
+      if (!limit.allowed) {
+        Alert.alert("Batas Pesanan", limit.reason || "Batas pesanan tercapai.");
+        return;
+      }
+    }
     setCart((prev) =>
       prev
         .map((item) => {
@@ -224,6 +295,19 @@ export default function CustomerProduct() {
       return;
     }
 
+    const blocking = await refreshBlockingOrder();
+    if (blocking) {
+      Alert.alert(
+        "Masih Ada Pesanan Belum Dibayar",
+        `Pesanan ${blocking.order_number} belum dibayar. Bayar di kasir atau batalkan dulu sebelum membuat pesanan baru.`,
+        [
+          { text: "Tutup", style: "cancel" },
+          { text: "Lihat Pesanan", onPress: () => router.push("/(customer)/orders") },
+        ]
+      );
+      return;
+    }
+
     setSubmittingOrder(true);
     try {
       // 1. Nomor order (ORD-YYYYMMDD-XXXX) dibuat atomik oleh trigger database,
@@ -248,25 +332,49 @@ export default function CustomerProduct() {
           orderType,
           paymentMethod,
           notes: combinedNotes,
+          paymentChannel: paymentOption.channel,
         })
       );
       if (orderErr) throw orderErr;
       const newOrder = created as unknown as CreatedOrder;
+      const totalNotice = getServerTotalNotice(cartTotals.total, Number(newOrder.total_amount));
+      const dueTime = newOrder.payment_due_at
+        ? new Date(newOrder.payment_due_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+        : null;
 
       // 5. Success Flow
       setCart([]);
+      refreshBlockingOrder();
       setCartModalVisible(false);
       setTableNumber("");
       setOrderNotes("");
 
+      if (paymentOption.channel === "Online") {
+        // QRIS online: buka halaman bayar Midtrans; pesanan diproses otomatis setelah lunas.
+        if (totalNotice) Alert.alert("Total Disesuaikan", totalNotice);
+        // Halaman bayar Midtrans dibuka di dalam aplikasi (layar Bayar QRIS).
+        const result = await openOnlinePayment(newOrder.id);
+        if (!result.ok) {
+          Alert.alert(
+            "Pembayaran Online Belum Bisa Dibuka",
+            `${result.error}\nPesanan ${newOrder.order_number} dibatalkan otomatis bila tidak dibayar dalam ${ONLINE_PAYMENT_TIMEOUT_MINUTES} menit.`
+          );
+          router.push("/(customer)/orders");
+        }
+        return;
+      }
+
       Alert.alert(
         "Pesanan Berhasil Dibuat!",
-        `Nomor Pesanan: ${newOrder.order_number}\n\n` +
+        `Nomor Pesanan: ${newOrder.order_number}\nTotal: ${formatRupiah(Number(newOrder.total_amount))}\n` +
+          (totalNotice ? `${totalNotice}\n` : "") +
+          "\n" +
           (paymentMethod === "QRIS"
-            ? "Scan QRIS di kasir lalu tunjukkan bukti pembayaran."
+            ? "Scan QRIS kedai di kasir lalu tunjukkan bukti pembayaran."
             : paymentMethod === "Debit"
             ? "Silakan bayar dengan kartu debit di kasir."
             : "Silakan bayar tunai di kasir.") +
+          `\nBayar di kasir dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit${dueTime ? ` (sebelum ${dueTime})` : ""}; lewat dari itu pesanan dibatalkan otomatis.` +
           "\nPesanan diproses setelah kasir mengonfirmasi pembayaran.",
         [
           {
@@ -278,6 +386,8 @@ export default function CustomerProduct() {
     } catch (err: any) {
       console.error("Error creating customer order:", err);
       Alert.alert("Gagal Membuat Pesanan", err.message || "Terjadi kesalahan sistem.");
+      // Mis. menu baru saja habis / harga berubah → muat ulang menu agar keranjang tersinkron.
+      fetchData();
     } finally {
       setSubmittingOrder(false);
     }
@@ -290,7 +400,12 @@ export default function CustomerProduct() {
       .reduce((sum, c) => sum + c.quantity, 0);
 
     return (
-      <View
+      // Tahan kartu untuk melihat detail menu; lepas untuk menutup (PRD 25: Product Detail).
+      <Pressable
+        onLongPress={() => setPeekProduct(item)}
+        onPressOut={() => setPeekProduct(null)}
+        delayLongPress={300}
+        accessibilityHint="Tahan untuk melihat detail menu"
         className={`bg-surface rounded-card p-4 mb-3 border border-line shadow-sm flex-row items-center ${
           !isAvailable ? "opacity-70" : ""
         }`}
@@ -381,6 +496,45 @@ export default function CustomerProduct() {
                 icon={<Ionicons name="close-circle" size={12} color="#991B1B" />}
               />
             )}
+          </View>
+        </View>
+      </Pressable>
+    );
+  };
+
+  const renderPeekDetail = () => {
+    if (!peekProduct) return null;
+    const detail = getProductDetailView(peekProduct);
+    return (
+      // pointerEvents="none": overlay tidak merebut sentuhan, sehingga saat jari dilepas
+      // kartu menu tetap menerima onPressOut dan detail langsung tertutup.
+      <View
+        pointerEvents="none"
+        style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 40 }}
+        className="bg-black/50 items-center justify-center px-6"
+      >
+        <View className="bg-surface rounded-card w-full max-w-sm overflow-hidden border border-line shadow-xl">
+          <View className="w-full h-56 bg-primary/10 items-center justify-center">
+            {peekProduct.image && !failedImages[peekProduct.id] ? (
+              <Image source={{ uri: peekProduct.image }} className="w-full h-full" resizeMode="cover" />
+            ) : (
+              <Ionicons name="cafe-outline" size={64} color="#D1001F" />
+            )}
+          </View>
+          <View className="p-4">
+            <View className="flex-row items-start justify-between mb-1">
+              <Text className="font-heading-bold text-text text-lg flex-1 mr-2">{peekProduct.name}</Text>
+              <Badge label={detail.statusLabel} tone={detail.tone} />
+            </View>
+            {peekProduct.category ? (
+              <Text className="font-body text-muted text-xs mb-2">{peekProduct.category.name}</Text>
+            ) : null}
+            <Text className="font-heading-bold text-primary text-xl mb-2">{formatRupiah(peekProduct.price)}</Text>
+            <Text className="font-body text-text text-sm leading-5">{detail.description}</Text>
+            {!detail.canOrder ? (
+              <Text className="font-body text-danger text-xs mt-2">Menu ini sedang habis dan belum dapat dipesan.</Text>
+            ) : null}
+            <Text className="font-body text-muted text-[11px] text-center mt-3">Lepaskan untuk menutup</Text>
           </View>
         </View>
       </View>
@@ -535,6 +689,9 @@ export default function CustomerProduct() {
             </View>
           }
           ListEmptyComponent={
+            menuError ? (
+              <ErrorState message={menuError} onRetry={onRefresh} />
+            ) : (
             <EmptyState
               title="Menu Tidak Ditemukan"
               description={
@@ -545,6 +702,7 @@ export default function CustomerProduct() {
               actionLabel={searchQuery ? "Reset Pencarian" : undefined}
               onAction={searchQuery ? () => setSearchQuery("") : undefined}
             />
+            )
           }
         />
       )}
@@ -553,7 +711,10 @@ export default function CustomerProduct() {
       {cart.length > 0 && (
         <View className="absolute bottom-5 left-4 right-4 items-center">
           <TouchableOpacity
-            onPress={() => setCartModalVisible(true)}
+            onPress={() => {
+              setCartModalVisible(true);
+              refreshBlockingOrder();
+            }}
             activeOpacity={0.9}
             className="bg-primary flex-row items-center justify-between px-5 py-3.5 rounded-full shadow-lg border border-red-700 w-full max-w-lg"
           >
@@ -712,10 +873,12 @@ export default function CustomerProduct() {
                       {/* Quantity Controls */}
                       <View className="flex-row items-center bg-background rounded-chip border border-line p-0.5">
                         <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`Kurangi ${item.productName}`}
                           onPress={() =>
                             handleUpdateQuantity(item.productId, item.notes, -1)
                           }
-                          className="w-7 h-7 rounded items-center justify-center bg-surface border border-line"
+                          className="w-11 h-11 rounded-chip items-center justify-center bg-surface border border-line"
                         >
                           <Ionicons name="remove" size={14} color="#1F2937" />
                         </TouchableOpacity>
@@ -725,10 +888,12 @@ export default function CustomerProduct() {
                         </Text>
 
                         <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`Tambah ${item.productName}`}
                           onPress={() =>
                             handleUpdateQuantity(item.productId, item.notes, 1)
                           }
-                          className="w-7 h-7 rounded items-center justify-center bg-surface border border-line"
+                          className="w-11 h-11 rounded-chip items-center justify-center bg-surface border border-line"
                         >
                           <Ionicons name="add" size={14} color="#1F2937" />
                         </TouchableOpacity>
@@ -849,38 +1014,47 @@ export default function CustomerProduct() {
                     />
                   </View>
 
-                  {/* Metode Pembayaran: dibayar di kasir (Tunai / QRIS / Debit) */}
+                  {/* Pilihan bayar: QRIS online (Midtrans) atau bayar di kasir */}
                   <Text className="font-body-medium text-text text-xs mb-1.5">
-                    Metode Pembayaran
+                    Cara Pembayaran
                   </Text>
-                  <View className="flex-row gap-2 mb-3.5">
-                    {PAYMENT_METHODS.map((method) => {
-                      const meta = getPaymentMethodMeta(method);
-                      const selected = paymentMethod === method;
+                  <View className="gap-2 mb-3.5">
+                    {CUSTOMER_PAYMENT_OPTIONS.map((option) => {
+                      const selected = paymentOptionKey === option.key;
                       return (
                         <TouchableOpacity
-                          key={method}
-                          accessibilityRole="button"
+                          key={option.key}
+                          accessibilityRole="radio"
                           accessibilityState={{ selected }}
-                          onPress={() => setPaymentMethod(method)}
-                          className={`flex-1 py-2.5 rounded-chip border items-center flex-row justify-center ${
-                            selected ? "bg-primary border-primary" : "bg-surface border-line"
+                          onPress={() => setPaymentOptionKey(option.key)}
+                          className={`min-h-12 px-3 py-2.5 rounded-chip border flex-row items-center ${
+                            selected ? "bg-primary/10 border-primary" : "bg-surface border-line"
                           }`}
                         >
-                          <Ionicons name={meta.icon} size={16} color={selected ? "#FFFFFF" : "#4B5563"} />
-                          <Text
-                            className={`text-xs ml-1.5 ${
-                              selected ? "font-heading-semibold text-white" : "font-body text-text"
-                            }`}
-                          >
-                            {meta.label}
-                          </Text>
+                          <Ionicons
+                            name={option.icon as keyof typeof Ionicons.glyphMap}
+                            size={18}
+                            color={selected ? "#D1001F" : "#4B5563"}
+                          />
+                          <View className="flex-1 ml-2.5">
+                            <Text className={`text-xs ${selected ? "font-heading-semibold text-primary" : "font-body-medium text-text"}`}>
+                              {option.label}
+                            </Text>
+                            <Text className="font-body text-muted text-[11px]">{option.description}</Text>
+                          </View>
+                          <Ionicons
+                            name={selected ? "radio-button-on" : "radio-button-off"}
+                            size={18}
+                            color={selected ? "#D1001F" : "#9CA3AF"}
+                          />
                         </TouchableOpacity>
                       );
                     })}
                   </View>
                   <Text className="font-body text-muted text-[11px] mb-3">
-                    Pembayaran dikonfirmasi oleh kasir. Pesanan mulai disiapkan setelah pembayaran diterima.
+                    {paymentOption.channel === "Online"
+                      ? `Selesaikan pembayaran QRIS dalam ${ONLINE_PAYMENT_TIMEOUT_MINUTES} menit; pesanan langsung disiapkan setelah lunas.`
+                      : `Bayar di kasir dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit; pesanan disiapkan setelah kasir mengonfirmasi pembayaran.`}
                   </Text>
 
                   {/* Catatan Khusus Pesanan */}
@@ -931,17 +1105,32 @@ export default function CustomerProduct() {
                   </View>
                 </View>
 
+                {blockingOrder && (
+                  <View className="bg-amber-50 border border-amber-200 rounded-card p-3 mb-3">
+                    <Text className="font-heading-semibold text-amber-800 text-xs">
+                      Pesanan {blockingOrder.order_number} belum dibayar
+                    </Text>
+                    <Text className="font-body text-amber-800 text-[11px] mt-0.5">
+                      Satu akun hanya boleh punya {CUSTOMER_MAX_UNPAID_ORDERS} pesanan yang belum dibayar. Bayar di kasir atau
+                      batalkan pesanan tersebut dulu.
+                    </Text>
+                  </View>
+                )}
+
                 <TouchableOpacity
                   onPress={handleSubmitOrder}
-                  disabled={submittingOrder}
+                  disabled={submittingOrder || !!blockingOrder}
+                  accessibilityState={{ disabled: submittingOrder || !!blockingOrder }}
                   activeOpacity={0.8}
                   className={`bg-primary py-3.5 rounded-card items-center justify-center shadow-md ${
-                    submittingOrder ? "opacity-60" : ""
+                    submittingOrder || blockingOrder ? "opacity-60" : ""
                   }`}
                 >
                   <Text className="font-heading-bold text-white text-base">
                     {submittingOrder
                       ? "Memproses Pesanan..."
+                      : paymentOption.channel === "Online"
+                      ? "Buat Pesanan & Bayar QRIS"
                       : "Konfirmasi & Buat Pesanan"}
                   </Text>
                 </TouchableOpacity>
@@ -950,6 +1139,8 @@ export default function CustomerProduct() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      {renderPeekDetail()}
     </View>
   );
 }

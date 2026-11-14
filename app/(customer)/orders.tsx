@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../lib/AuthContext";
 import { ScreenHeader } from "../../components/ScreenHeader";
 import { Badge } from "../../components/Badge";
-import { LoadingState, EmptyState } from "../../components/States";
+import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { formatRupiah } from "../../lib/formatters";
 import { useResponsive } from "../../hooks/useResponsive";
 import {
@@ -26,7 +26,15 @@ import {
   getPaymentStatusMeta,
   canCustomerCancelOrder,
   validateCancellationPayload,
+  describeCancellation,
+  formatCountdown,
+  getPaymentTimeLeftMs,
+  isPaymentExpired,
+  CUSTOMER_PAYMENT_TIMEOUT_MINUTES,
+  ONLINE_PAYMENT_TIMEOUT_MINUTES,
 } from "../../lib/order-logic";
+import { isOnlineOrder } from "../../lib/payment-gateway-logic";
+import { openOnlinePayment } from "../../lib/online-payment";
 import { getCustomerOrderStatusMeta } from "../../lib/customer-order-logic";
 
 interface OrderItemDetail {
@@ -51,6 +59,7 @@ export default function CustomerOrdersScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"active" | "history">("active");
+  const [errorMessage, setErrorMessage] = useState("");
 
   // Selected Order for Receipt Details Modal
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
@@ -61,6 +70,8 @@ export default function CustomerOrdersScreen() {
   const [cancelMode, setCancelMode] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  // Pesanan QRIS online yang sedang dibuka halaman bayarnya
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
 
   const handleCancelOrder = async () => {
     if (!selectedOrder) return;
@@ -100,6 +111,9 @@ export default function CustomerOrdersScreen() {
   const fetchOrders = useCallback(async () => {
     if (!userId) return;
     try {
+      setErrorMessage("");
+      // Pesanan yang melewati batas bayar 15 menit dibatalkan dulu (cadangan bila pg_cron belum aktif).
+      await supabase.rpc("expire_unpaid_orders");
       // PRD Section 26: Customer hanya dapat melihat Order yang berkaitan dengan User Account miliknya.
       const { data, error } = await supabase
         .from("orders")
@@ -111,6 +125,7 @@ export default function CustomerOrdersScreen() {
       setOrders((data as OrderWithItems[]) || []);
     } catch (err: any) {
       console.error("Error fetching customer orders:", err);
+      setErrorMessage(err?.message || "Gagal memuat pesanan. Periksa koneksi internet Anda.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -123,7 +138,7 @@ export default function CustomerOrdersScreen() {
     // Realtime subscription for customer's orders
     if (!userId) return;
     const channel = supabase
-      .channel("customer-orders-channel")
+      .channel(`customer-orders-${userId}`)
       .on(
         "postgres_changes",
         {
@@ -147,6 +162,22 @@ export default function CustomerOrdersScreen() {
     setRefreshing(true);
     fetchOrders();
   };
+
+  // Hitung mundur batas bayar; saat waktu habis, muat ulang agar pesanan tampil dibatalkan.
+  const [now, setNow] = useState(() => new Date());
+  const hasAwaiting = orders.some((o) => getPaymentTimeLeftMs(o) !== null);
+  useEffect(() => {
+    if (!hasAwaiting) return;
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, [hasAwaiting]);
+  const lastExpiryRefresh = useRef(0);
+  useEffect(() => {
+    if (!orders.some((o) => isPaymentExpired(o, now))) return;
+    if (Date.now() - lastExpiryRefresh.current < 15_000) return;
+    lastExpiryRefresh.current = Date.now();
+    fetchOrders();
+  }, [now, orders, fetchOrders]);
 
   const handleOpenDetail = async (order: OrderWithItems) => {
     setSelectedOrder(order);
@@ -199,17 +230,79 @@ export default function CustomerOrdersScreen() {
   };
 
   // Status Stepper Component
-  const renderStatusStepper = (status: OrderStatus) => {
+  const handlePayOnline = async (order: OrderWithItems) => {
+    setPayingOrderId(order.id);
+    // Layar Bayar QRIS (di dalam aplikasi) mengikuti status lunas dari webhook Midtrans.
+    const result = await openOnlinePayment(order.id);
+    setPayingOrderId(null);
+    if (!result.ok) {
+      Alert.alert("Pembayaran Online", result.error);
+      fetchOrders();
+    }
+  };
+
+  const renderPaymentDeadline = (order: OrderWithItems) => {
+    const left = getPaymentTimeLeftMs(order, now);
+    if (left === null) return null;
+    const expired = left <= 0;
+    const online = isOnlineOrder(order);
+    const limitMinutes = online ? ONLINE_PAYMENT_TIMEOUT_MINUTES : CUSTOMER_PAYMENT_TIMEOUT_MINUTES;
+    const dueTime = order.payment_due_at
+      ? new Date(order.payment_due_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
+      : "-";
+    return (
+      <View
+        accessibilityLiveRegion="polite"
+        className={`rounded-card p-3 mb-2 border flex-row items-center ${
+          expired ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
+        }`}
+      >
+        <Ionicons name={expired ? "alert-circle" : "time-outline"} size={20} color={expired ? "#DC2626" : "#B45309"} />
+        <View className="ml-2 flex-1">
+          <Text className={`font-heading-semibold text-xs ${expired ? "text-danger" : "text-amber-800"}`}>
+            {expired
+              ? "Batas bayar habis"
+              : online
+              ? `Selesaikan pembayaran QRIS sebelum ${dueTime}`
+              : `Bayar di kasir sebelum ${dueTime}`}
+          </Text>
+          <Text className={`font-body text-[11px] ${expired ? "text-red-700" : "text-amber-800"}`}>
+            {expired
+              ? "Pesanan dibatalkan otomatis. Silakan pesan kembali."
+              : `Sisa waktu ${formatCountdown(left)} · lewat ${limitMinutes} menit pesanan dibatalkan otomatis.`}
+          </Text>
+          {online && !expired && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Bayar pesanan ${order.order_number} dengan QRIS online`}
+              onPress={() => handlePayOnline(order)}
+              disabled={payingOrderId === order.id}
+              className="mt-2 min-h-11 bg-primary rounded-chip flex-row items-center justify-center px-3"
+            >
+              <Ionicons name="qr-code-outline" size={16} color="#FFFFFF" />
+              <Text className="font-heading-semibold text-white text-xs ml-1.5">
+                {payingOrderId === order.id ? "Membuka pembayaran..." : "Bayar Sekarang (QRIS)"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderStatusStepper = (order: OrderWithItems) => {
+    const status: OrderStatus = order.order_status;
     if (status === "Cancelled") {
+      const cancellation = describeCancellation(order, userId);
       return (
         <View className="bg-red-50 border border-red-200 rounded-card p-3 my-2 flex-row items-center">
           <Ionicons name="close-circle" size={20} color="#DC2626" />
           <View className="ml-2 flex-1">
             <Text className="font-heading-semibold text-danger text-xs">
-              Pesanan Dibatalkan
+              {cancellation.title}
             </Text>
             <Text className="font-body text-red-700 text-[11px]">
-              Pesanan ini telah dibatalkan oleh kasir/admin.
+              {cancellation.detail}
             </Text>
           </View>
         </View>
@@ -326,8 +419,11 @@ export default function CustomerOrdersScreen() {
           </View>
         </View>
 
+        {/* Batas bayar di kasir (pesanan belum dibayar) */}
+        {renderPaymentDeadline(item)}
+
         {/* Progress Stepper for Active Orders */}
-        {renderStatusStepper(item.order_status)}
+        {renderStatusStepper(item)}
 
         {/* Order Footer with Total & Detail Action */}
         <View className="pt-3 border-t border-line flex-row justify-between items-center mt-1">
@@ -451,6 +547,9 @@ export default function CustomerOrdersScreen() {
             />
           }
           ListEmptyComponent={
+            errorMessage ? (
+              <ErrorState message={errorMessage} onRetry={fetchOrders} />
+            ) : (
             <EmptyState
               title={
                 activeTab === "active"
@@ -465,6 +564,7 @@ export default function CustomerOrdersScreen() {
               actionLabel={activeTab === "active" ? "Buka Katalog Menu" : undefined}
               onAction={activeTab === "active" ? () => router.push("/(customer)/product") : undefined}
             />
+            )
           }
         />
       )}

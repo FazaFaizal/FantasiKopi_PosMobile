@@ -5,7 +5,8 @@
  * Sesuai PRD Iterasi 4 (Section 27).
  */
 
-import { OrderStatus, PaymentMethod, PaymentStatus, isPaymentSettled, isRecognizedSale } from './order-logic';
+import { OrderStatus, PaymentMethod, PaymentStatus, getRevenueTimestamp, isPaymentSettled, isRecognizedSale } from './order-logic';
+import type { FinancialReportSummary, SalesReportSummary } from './report-logic';
 import { getBusinessDateString, toBusinessDateString } from './timezone';
 
 export interface DashboardOrderItem {
@@ -23,6 +24,7 @@ export interface DashboardOrder {
   customer_name?: string | null;
   payment_method?: PaymentMethod;
   created_at: string;
+  paid_at?: string | null;
   items?: DashboardOrderItem[];
 }
 
@@ -94,8 +96,11 @@ export function calculateTodayDashboardMetrics(
   const todayOrders = orders.filter((o) => isSameDay(o.created_at, todayDate));
   const todayOrderCount = todayOrders.length;
 
-  // 2. Filter Order yang diakui sebagai penjualan hari ini (lunas & tidak dibatalkan)
-  const todayPaidOrders = todayOrders.filter(isRecognizedSale);
+  // 2. Order yang diakui sebagai penjualan hari ini: lunas, tidak dibatalkan, dan
+  //    uangnya diterima hari ini (paid_at; data lama memakai created_at).
+  const todayPaidOrders = orders.filter(
+    (o) => isRecognizedSale(o) && isSameDay(getRevenueTimestamp(o), todayDate)
+  );
   const todayPaidOrderCount = todayPaidOrders.length;
   const todaySales = todayPaidOrders.reduce(
     (sum, o) => sum + Number(o.total_amount || 0),
@@ -195,3 +200,26 @@ export function getRecentOrders(
     .slice(0, limit);
 }
 
+/**
+ * Ganti angka penjualan & keuangan dashboard dengan ringkasan database
+ * (get_sales_summary hari ini) agar sama persis dengan halaman Laporan.
+ * Jumlah order hari ini / yang berjalan / status stok tetap dari data lokal.
+ */
+export function applySalesSummaryToDashboard(
+  metrics: TodayDashboardMetrics,
+  summary: { salesReport: SalesReportSummary; financialReport: FinancialReportSummary },
+  options: { awaitingPaymentCount?: number } = {}
+): TodayDashboardMetrics {
+  const top = summary.salesReport.topProducts[0];
+  return {
+    ...metrics,
+    todaySales: summary.financialReport.totalSales,
+    todayPaidOrderCount: summary.salesReport.totalPaidOrders,
+    todayExpenses: summary.financialReport.totalExpenses,
+    todayNetResult: summary.financialReport.netProfit,
+    topProductToday: top
+      ? { name: top.productName, quantity: top.quantitySold, sales: top.totalRevenue }
+      : null,
+    todayAwaitingPaymentCount: options.awaitingPaymentCount ?? metrics.todayAwaitingPaymentCount,
+  };
+}

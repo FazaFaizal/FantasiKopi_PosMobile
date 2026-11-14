@@ -1389,7 +1389,8 @@ BEGIN
         RAISE EXCEPTION 'Laporan hanya dapat dilihat oleh Admin.' USING ERRCODE = 'insufficient_privilege';
     END IF;
 
-    -- Batas hari mengikuti zona waktu bisnis; rentang timestamptz agar index created_at terpakai.
+    -- Batas hari mengikuti zona waktu bisnis. Penjualan diakui saat dibayar (paid_at);
+    -- data lama tanpa paid_at memakai created_at (index idx_orders_revenue_at).
     v_start := CASE WHEN p_from IS NULL THEN '-infinity'::TIMESTAMPTZ
                     ELSE p_from::TIMESTAMP AT TIME ZONE public.business_timezone() END;
     v_end := CASE WHEN p_to IS NULL THEN 'infinity'::TIMESTAMPTZ
@@ -1400,8 +1401,8 @@ BEGIN
           FROM public.orders o
          WHERE o.payment_status = 'Paid'
            AND o.order_status <> 'Cancelled'
-           AND o.created_at >= v_start
-           AND o.created_at < v_end
+           AND COALESCE(o.paid_at, o.created_at) >= v_start
+           AND COALESCE(o.paid_at, o.created_at) < v_end
     ),
     items AS (
         SELECT oi.product_id, oi.product_name, oi.quantity, oi.subtotal
@@ -1535,5 +1536,1231 @@ CREATE TRIGGER guard_order_payment_correction BEFORE UPDATE ON public.orders
 REVOKE EXECUTE ON FUNCTION public.guard_order_payment_correction() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.cancel_my_order(UUID, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cancel_my_order(UUID, TEXT) TO authenticated;
+
+-- ==============================================================================
+-- 16. AUDIT ITERASI 4: BATAS BAYAR 15 MENIT, REALTIME, OMZET SAAT DIBAYAR
+-- ==============================================================================
+-- ------------------------------------------------------------------------------
+-- 1. Batas bayar pesanan customer
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_due_at TIMESTAMPTZ;
+
+CREATE OR REPLACE FUNCTION public.customer_payment_timeout()
+RETURNS INTERVAL
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$ SELECT INTERVAL '15 minutes' $$;
+
+-- Diisi database (nilai dari klien diabaikan) dan tidak dapat diperpanjang lewat UPDATE.
+CREATE OR REPLACE FUNCTION public.set_order_payment_due()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.order_status = 'Pending' AND NEW.payment_status = 'Pending' THEN
+            NEW.payment_due_at := COALESCE(NEW.created_at, NOW()) + public.customer_payment_timeout();
+        ELSE
+            NEW.payment_due_at := NULL;
+        END IF;
+    ELSIF OLD.payment_due_at IS NOT NULL THEN
+        NEW.payment_due_at := OLD.payment_due_at;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS set_order_payment_due ON public.orders;
+CREATE TRIGGER set_order_payment_due BEFORE INSERT OR UPDATE ON public.orders
+    FOR EACH ROW EXECUTE FUNCTION public.set_order_payment_due();
+
+-- Pesanan lama yang masih menunggu bayar ikut mendapat batas waktu.
+UPDATE public.orders
+   SET payment_due_at = created_at + public.customer_payment_timeout()
+ WHERE order_status = 'Pending' AND payment_status = 'Pending' AND payment_due_at IS NULL;
+
+-- Kasir tidak dapat menerima pembayaran untuk pesanan yang kedaluwarsa atau dibatalkan.
+CREATE OR REPLACE FUNCTION public.guard_expired_order_payment()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.payment_status = 'Paid' AND OLD.payment_status IS DISTINCT FROM 'Paid' THEN
+        IF OLD.order_status = 'Cancelled' THEN
+            RAISE EXCEPTION 'Pesanan % sudah dibatalkan sehingga pembayarannya tidak dapat diterima.', OLD.order_number
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF OLD.payment_due_at IS NOT NULL AND OLD.payment_due_at <= NOW() THEN
+            RAISE EXCEPTION 'Pesanan % sudah kedaluwarsa (tidak dibayar dalam % menit). Buat pesanan baru lewat POS.',
+                OLD.order_number, EXTRACT(EPOCH FROM public.customer_payment_timeout())::INTEGER / 60
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_expired_order_payment ON public.orders;
+CREATE TRIGGER guard_expired_order_payment BEFORE UPDATE ON public.orders
+    FOR EACH ROW EXECUTE FUNCTION public.guard_expired_order_payment();
+
+-- Membatalkan pesanan customer yang melewati batas bayar. Aman dipanggil berulang.
+CREATE OR REPLACE FUNCTION public.expire_unpaid_orders()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    UPDATE public.orders
+       SET order_status = 'Cancelled',
+           cancelled_at = NOW(),
+           cancellation_reason = format('Otomatis dibatalkan: tidak dibayar dalam %s menit.',
+                                        EXTRACT(EPOCH FROM public.customer_payment_timeout())::INTEGER / 60),
+           updated_at = NOW()
+     WHERE order_status = 'Pending'
+       AND payment_status = 'Pending'
+       AND payment_due_at IS NOT NULL
+       AND payment_due_at <= NOW();
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count;
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_orders_awaiting_payment ON public.orders(payment_due_at)
+    WHERE order_status = 'Pending' AND payment_status = 'Pending';
+
+-- Jadwal tiap menit bila ekstensi pg_cron aktif (Dashboard → Database → Extensions).
+-- Tanpa pg_cron, aplikasi tetap memanggil expire_unpaid_orders() saat memuat pesanan.
+DO $do$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+        PERFORM cron.schedule('expire-unpaid-orders', '* * * * *', 'SELECT public.expire_unpaid_orders()');
+    END IF;
+END
+$do$;
+
+-- ------------------------------------------------------------------------------
+-- 2. Realtime untuk tabel orders (RLS tetap berlaku pada event realtime)
+-- ------------------------------------------------------------------------------
+DO $do$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime')
+       AND NOT EXISTS (
+           SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'orders'
+       ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.orders;
+    END IF;
+END
+$do$;
+
+-- ------------------------------------------------------------------------------
+-- 3 & 4. Omzet diakui saat dibayar; create_order mengembalikan batas bayar
+-- ------------------------------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_orders_revenue_at ON public.orders ((COALESCE(paid_at, created_at)));
+
+CREATE OR REPLACE FUNCTION public.create_order(
+    p_items JSONB,
+    p_customer_name TEXT,
+    p_order_type TEXT,
+    p_payment_method TEXT,
+    p_notes TEXT DEFAULT NULL
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+    v_is_staff BOOLEAN := public.is_staff();
+    v_item JSONB;
+    v_qty INTEGER;
+    v_product public.products%ROWTYPE;
+    v_total NUMERIC := 0;
+    v_customer TEXT := NULLIF(btrim(p_customer_name), '');
+    v_order public.orders%ROWTYPE;
+BEGIN
+    -- SECURITY INVOKER: RLS & trigger (sif, gerbang pembayaran, nomor order) tetap berlaku.
+    IF NOT v_is_staff AND NOT public.is_active_customer() THEN
+        RAISE EXCEPTION 'Akun ini tidak diizinkan membuat pesanan.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'Keranjang belanja masih kosong.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NOT v_is_staff AND v_customer IS NULL THEN
+        RAISE EXCEPTION 'Nama pemesan wajib diisi.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Validasi item & hitung total dari harga resmi produk.
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_items) LOOP
+        v_qty := (v_item ->> 'quantity')::INTEGER;
+        IF v_qty IS NULL OR v_qty <= 0 THEN
+            RAISE EXCEPTION 'Jumlah item tidak valid.' USING ERRCODE = 'check_violation';
+        END IF;
+
+        SELECT p.* INTO v_product
+          FROM public.products p
+         WHERE p.id = (v_item ->> 'product_id')::UUID
+           AND p.is_active = true
+           AND p.status = 'Tersedia';
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Ada menu di keranjang yang sudah tidak tersedia. Muat ulang menu lalu coba lagi.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        v_total := v_total + v_product.price * v_qty;
+    END LOOP;
+
+    INSERT INTO public.orders
+        (user_id, cashier_name, customer_name, total_amount, payment_method,
+         payment_status, order_status, order_type, notes)
+    VALUES (
+        auth.uid(),
+        CASE WHEN v_is_staff THEN (SELECT email FROM public.users WHERE id = auth.uid()) END,
+        COALESCE(v_customer, 'Pelanggan Umum'),
+        v_total,
+        p_payment_method,
+        CASE WHEN v_is_staff THEN 'Paid' ELSE 'Pending' END,
+        CASE WHEN v_is_staff THEN 'Processing' ELSE 'Pending' END,
+        p_order_type,
+        NULLIF(btrim(p_notes), '')
+    )
+    RETURNING * INTO v_order;
+
+    INSERT INTO public.order_items (order_id, product_id, product_name, unit_price, quantity, subtotal, notes)
+    SELECT v_order.id, p.id, p.name, p.price, (i.value ->> 'quantity')::INTEGER,
+           p.price * (i.value ->> 'quantity')::INTEGER, NULLIF(btrim(i.value ->> 'notes'), '')
+      FROM jsonb_array_elements(p_items) AS i
+      JOIN public.products p ON p.id = (i.value ->> 'product_id')::UUID;
+
+    RETURN json_build_object(
+        'id', v_order.id,
+        'order_number', v_order.order_number,
+        'total_amount', v_order.total_amount,
+        'order_status', v_order.order_status,
+        'payment_status', v_order.payment_status,
+        'created_at', v_order.created_at,
+        'payment_due_at', v_order.payment_due_at
+    );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_sales_summary(p_from DATE DEFAULT NULL, p_to DATE DEFAULT NULL)
+RETURNS JSON
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+    v_start TIMESTAMPTZ;
+    v_end TIMESTAMPTZ;
+    v_result JSON;
+BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Laporan hanya dapat dilihat oleh Admin.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    -- Batas hari mengikuti zona waktu bisnis. Penjualan diakui saat dibayar (paid_at);
+    -- data lama tanpa paid_at memakai created_at (index idx_orders_revenue_at).
+    v_start := CASE WHEN p_from IS NULL THEN '-infinity'::TIMESTAMPTZ
+                    ELSE p_from::TIMESTAMP AT TIME ZONE public.business_timezone() END;
+    v_end := CASE WHEN p_to IS NULL THEN 'infinity'::TIMESTAMPTZ
+                  ELSE (p_to + 1)::TIMESTAMP AT TIME ZONE public.business_timezone() END;
+
+    WITH sales AS (
+        SELECT o.id, o.total_amount
+          FROM public.orders o
+         WHERE o.payment_status = 'Paid'
+           AND o.order_status <> 'Cancelled'
+           AND COALESCE(o.paid_at, o.created_at) >= v_start
+           AND COALESCE(o.paid_at, o.created_at) < v_end
+    ),
+    items AS (
+        SELECT oi.product_id, oi.product_name, oi.quantity, oi.subtotal
+          FROM public.order_items oi
+          JOIN sales s ON s.id = oi.order_id
+    ),
+    top_products AS (
+        SELECT (array_agg(product_id))[1] AS product_id,
+               MAX(product_name) AS product_name,
+               SUM(quantity) AS quantity_sold,
+               SUM(subtotal) AS total_revenue
+          FROM items
+         GROUP BY COALESCE(product_id::TEXT, product_name)
+         ORDER BY SUM(quantity) DESC, SUM(subtotal) DESC
+         LIMIT 5
+    ),
+    expense_categories AS (
+        SELECT category, SUM(amount) AS amount
+          FROM public.expenses
+         WHERE (p_from IS NULL OR expense_date >= p_from)
+           AND (p_to IS NULL OR expense_date <= p_to)
+         GROUP BY category
+    )
+    SELECT json_build_object(
+        'total_revenue', COALESCE((SELECT SUM(total_amount) FROM sales), 0),
+        'paid_orders', (SELECT COUNT(*) FROM sales),
+        'items_sold', COALESCE((SELECT SUM(quantity) FROM items), 0),
+        'top_products', COALESCE((SELECT json_agg(t ORDER BY t.quantity_sold DESC, t.total_revenue DESC) FROM top_products t), '[]'::JSON),
+        'total_expenses', COALESCE((SELECT SUM(amount) FROM expense_categories), 0),
+        'expenses_by_category', COALESCE((SELECT json_agg(e) FROM expense_categories e), '[]'::JSON)
+    ) INTO v_result;
+
+    RETURN v_result;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- Hak eksekusi
+-- ------------------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION public.customer_payment_timeout() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.customer_payment_timeout() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.set_order_payment_due() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.guard_expired_order_payment() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.expire_unpaid_orders() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.expire_unpaid_orders() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_sales_summary(DATE, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_sales_summary(DATE, DATE) TO authenticated;
+
+-- ==============================================================================
+-- 17. ATURAN KATEGORI & PRODUK: kategori dengan produk tidak dapat dinonaktifkan
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.guard_category_deactivation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    IF NEW.status = 'Nonaktif' AND OLD.status IS DISTINCT FROM 'Nonaktif'
+       AND EXISTS (SELECT 1 FROM public.products p WHERE p.category_id = NEW.id) THEN
+        SELECT COUNT(*) INTO v_count FROM public.products WHERE category_id = NEW.id;
+        RAISE EXCEPTION 'Kategori "%" masih dipakai % produk. Pindahkan produk tersebut ke kategori lain atau hapus produknya terlebih dahulu.',
+            NEW.name, v_count
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_category_deactivation ON public.categories;
+CREATE TRIGGER guard_category_deactivation BEFORE UPDATE ON public.categories
+    FOR EACH ROW EXECUTE FUNCTION public.guard_category_deactivation();
+
+CREATE OR REPLACE FUNCTION public.guard_product_category_active()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.is_active AND NEW.category_id IS NOT NULL
+       AND (TG_OP = 'INSERT'
+            OR NEW.category_id IS DISTINCT FROM OLD.category_id
+            OR NEW.is_active IS DISTINCT FROM OLD.is_active)
+       AND EXISTS (SELECT 1 FROM public.categories c WHERE c.id = NEW.category_id AND c.status = 'Nonaktif') THEN
+        RAISE EXCEPTION 'Kategori yang dipilih sedang nonaktif. Aktifkan kategorinya atau pilih kategori lain.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_product_category_active ON public.products;
+CREATE TRIGGER guard_product_category_active BEFORE INSERT OR UPDATE ON public.products
+    FOR EACH ROW EXECUTE FUNCTION public.guard_product_category_active();
+
+REVOKE EXECUTE ON FUNCTION public.guard_category_deactivation() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.guard_product_category_active() FROM PUBLIC, anon, authenticated;
+
+-- ==============================================================================
+-- 18. ATURAN KARYAWAN & AKUN PENGGUNA: akun customer terpisah, akun karyawan wajib
+--     terhubung ke satu data karyawan, karyawan tidak dapat dihapus
+-- ==============================================================================
+-- ------------------------------------------------------------------------------
+-- 1. Nama di profil
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS full_name TEXT;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.users (id, email, role, status, full_name)
+    VALUES (NEW.id, NEW.email, 'Customer', 'Aktif', NULLIF(btrim(NEW.raw_user_meta_data ->> 'name'), ''))
+    ON CONFLICT (id) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+UPDATE public.users u
+   SET full_name = NULLIF(btrim(a.raw_user_meta_data ->> 'name'), '')
+  FROM auth.users a
+ WHERE a.id = u.id
+   AND u.full_name IS NULL
+   AND NULLIF(btrim(a.raw_user_meta_data ->> 'name'), '') IS NOT NULL;
+
+-- ------------------------------------------------------------------------------
+-- 2. Rapikan data lama sebelum aturan dipasang
+-- ------------------------------------------------------------------------------
+-- Akun Customer tidak terhubung dengan karyawan.
+UPDATE public.users SET employee_id = NULL WHERE role = 'Customer' AND employee_id IS NOT NULL;
+
+-- Satu karyawan satu akun: akun tertua tetap terhubung, sisanya dilepas lalu dibuatkan datanya.
+UPDATE public.users u
+   SET employee_id = NULL
+ WHERE u.employee_id IS NOT NULL
+   AND EXISTS (
+       SELECT 1 FROM public.users o
+        WHERE o.employee_id = u.employee_id
+          AND (o.created_at, o.id) < (u.created_at, u.id)
+   );
+
+-- Akun karyawan tanpa data karyawan dibuatkan datanya (nama dapat diubah di menu Karyawan).
+DO $do$
+DECLARE
+    r RECORD;
+    v_employee UUID;
+BEGIN
+    FOR r IN
+        SELECT u.id, u.email, u.role, u.full_name
+          FROM public.users u
+         WHERE u.role IN ('Admin', 'Kasir') AND u.employee_id IS NULL
+    LOOP
+        INSERT INTO public.employees (name, email, position, status)
+        VALUES (COALESCE(r.full_name, split_part(r.email, '@', 1)), r.email, r.role, 'Aktif')
+        RETURNING id INTO v_employee;
+        UPDATE public.users SET employee_id = v_employee WHERE id = r.id;
+    END LOOP;
+END
+$do$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_employee_id_unique ON public.users(employee_id) WHERE employee_id IS NOT NULL;
+
+-- ------------------------------------------------------------------------------
+-- 3 & 4. Aturan akun
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.guard_user_account_rules()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE
+    v_uid UUID := auth.uid();
+    v_employee public.employees%ROWTYPE;
+BEGIN
+    -- Admin tidak dapat mengubah role / menonaktifkan akunnya sendiri.
+    IF TG_OP = 'UPDATE' AND v_uid IS NOT NULL AND OLD.id = v_uid
+       AND (NEW.role IS DISTINCT FROM OLD.role OR (OLD.status = 'Aktif' AND NEW.status = 'Nonaktif')) THEN
+        RAISE EXCEPTION 'Anda tidak dapat mengubah role atau menonaktifkan akun Anda sendiri. Minta Admin lain melakukannya.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Customer <-> karyawan tidak dapat saling diubah oleh pengguna aplikasi.
+    -- (Proses sistem tanpa auth.uid(), mis. Edge Function create-staff-user, mengubah
+    --  profil baru dari Customer menjadi Admin/Kasir saat akun karyawan dibuat.)
+    IF TG_OP = 'UPDATE' AND v_uid IS NOT NULL
+       AND (OLD.role = 'Customer') IS DISTINCT FROM (NEW.role = 'Customer') THEN
+        RAISE EXCEPTION 'Akun Customer terpisah dari akun karyawan sehingga tidak dapat diubah menjadi Admin/Kasir (atau sebaliknya). Buat akun karyawan lewat menu Akun Pengguna.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW.role = 'Customer' THEN
+        IF NEW.employee_id IS NOT NULL THEN
+            RAISE EXCEPTION 'Akun Customer tidak dapat dihubungkan dengan data karyawan.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    IF NEW.employee_id IS NULL THEN
+        RAISE EXCEPTION 'Akun karyawan wajib terhubung dengan data karyawan.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NEW.status = 'Aktif'
+       AND (TG_OP = 'INSERT'
+            OR OLD.status IS DISTINCT FROM 'Aktif'
+            OR NEW.employee_id IS DISTINCT FROM OLD.employee_id
+            OR OLD.role = 'Customer') THEN
+        SELECT * INTO v_employee FROM public.employees WHERE id = NEW.employee_id;
+        IF NOT FOUND OR v_employee.status <> 'Aktif' THEN
+            RAISE EXCEPTION 'Karyawan % berstatus Nonaktif. Aktifkan data karyawannya terlebih dahulu sebelum mengaktifkan akun ini.',
+                COALESCE(v_employee.name, '')
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS guard_user_account_rules ON public.users;
+CREATE TRIGGER guard_user_account_rules BEFORE INSERT OR UPDATE ON public.users
+    FOR EACH ROW EXECUTE FUNCTION public.guard_user_account_rules();
+
+-- ------------------------------------------------------------------------------
+-- 5. Karyawan tidak dapat dihapus
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.prevent_employee_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    RAISE EXCEPTION 'Data karyawan tidak dapat dihapus agar riwayat tetap valid. Nonaktifkan karyawan sebagai gantinya.'
+        USING ERRCODE = 'check_violation';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS prevent_employee_delete ON public.employees;
+CREATE TRIGGER prevent_employee_delete BEFORE DELETE ON public.employees
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_employee_delete();
+
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.guard_user_account_rules() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.prevent_employee_delete() FROM PUBLIC, anon, authenticated;
+
+-- ==============================================================================
+-- 19. RECENT ACTIVITY DASHBOARD & BATAS PESANAN CUSTOMER
+-- ==============================================================================
+-- ------------------------------------------------------------------------------
+-- 1. Riwayat koreksi metode bayar
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.order_payment_corrections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+    order_number TEXT NOT NULL,
+    old_method TEXT NOT NULL,
+    new_method TEXT NOT NULL,
+    corrected_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    corrected_by_email TEXT,
+    corrected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_payment_corrections_order_id ON public.order_payment_corrections(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_payment_corrections_corrected_by ON public.order_payment_corrections(corrected_by);
+CREATE INDEX IF NOT EXISTS idx_order_payment_corrections_corrected_at ON public.order_payment_corrections(corrected_at DESC);
+
+ALTER TABLE public.order_payment_corrections ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.order_payment_corrections FROM anon;
+REVOKE INSERT, UPDATE, DELETE ON public.order_payment_corrections FROM authenticated;
+GRANT SELECT ON public.order_payment_corrections TO authenticated;
+
+DROP POLICY IF EXISTS "Admins can view payment corrections" ON public.order_payment_corrections;
+CREATE POLICY "Admins can view payment corrections"
+    ON public.order_payment_corrections FOR SELECT
+    TO authenticated
+    USING ((select public.is_admin()));
+
+CREATE OR REPLACE FUNCTION public.guard_order_payment_correction()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_email TEXT;
+BEGIN
+    IF NEW.payment_method IS DISTINCT FROM OLD.payment_method AND auth.uid() IS NOT NULL THEN
+        IF NOT public.is_admin() THEN
+            RAISE EXCEPTION 'Hanya Admin yang dapat mengoreksi metode pembayaran.' USING ERRCODE = 'insufficient_privilege';
+        END IF;
+        v_email := COALESCE((SELECT email FROM public.users WHERE id = auth.uid()), 'Admin');
+        NEW.notes := concat_ws(
+            ' | ',
+            NULLIF(OLD.notes, ''),
+            format('Koreksi metode pembayaran oleh %s: %s → %s', v_email, OLD.payment_method, NEW.payment_method)
+        );
+        INSERT INTO public.order_payment_corrections
+            (order_id, order_number, old_method, new_method, corrected_by, corrected_by_email)
+        VALUES (OLD.id, OLD.order_number, OLD.payment_method, NEW.payment_method, auth.uid(), v_email);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 2. Aktivitas terbaru (khusus Admin)
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_recent_activity(p_limit INTEGER DEFAULT 20, p_category TEXT DEFAULT NULL)
+RETURNS JSON
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+    v_limit INTEGER := LEAST(GREATEST(COALESCE(p_limit, 20), 1), 100);
+    v_result JSON;
+BEGIN
+    IF NOT public.is_admin() THEN
+        RAISE EXCEPTION 'Aktivitas operasional hanya dapat dilihat oleh Admin.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    WITH activity AS (
+        (SELECT 'shift_open'::TEXT AS kind, 'kas'::TEXT AS category, s.opened_at AS occurred_at,
+                s.opened_by_name AS actor, s.id::TEXT AS ref_id, NULL::TEXT AS ref_label,
+                s.opening_cash AS amount, NULL::NUMERIC AS quantity, NULL::TEXT AS unit,
+                s.opening_note AS note, NULL::TEXT AS extra
+           FROM public.cash_shifts s
+          ORDER BY s.opened_at DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT 'shift_close', 'kas', s.closed_at, s.closed_by_name, s.id::TEXT, NULL,
+                s.difference, NULL, NULL, s.closing_note, NULL
+           FROM public.cash_shifts s
+          WHERE s.status = 'Closed' AND s.closed_at IS NOT NULL
+          ORDER BY s.closed_at DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT CASE
+                    WHEN o.cancelled_by IS NULL
+                         AND (o.cancellation_reason LIKE 'Otomatis dibatalkan%' OR o.cancellation_reason LIKE 'Pembayaran online%')
+                    THEN 'order_auto_cancel'
+                    WHEN o.payment_status = 'Refunded' THEN 'order_refund'
+                    ELSE 'order_cancel'
+                END,
+                'pesanan', o.cancelled_at, u.email, o.id::TEXT, o.order_number,
+                o.total_amount, NULL, NULL, o.cancellation_reason, o.payment_method
+           FROM public.orders o
+           LEFT JOIN public.users u ON u.id = o.cancelled_by
+          WHERE o.order_status = 'Cancelled' AND o.cancelled_at IS NOT NULL
+          ORDER BY o.cancelled_at DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT 'payment_correction', 'pesanan', c.corrected_at, c.corrected_by_email, c.order_id::TEXT,
+                c.order_number, NULL, NULL, NULL, NULL, c.old_method || ' → ' || c.new_method
+           FROM public.order_payment_corrections c
+          ORDER BY c.corrected_at DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT 'stock_movement', 'stok', m.created_at, COALESCE(m.user_name, u.email), m.inventory_id::TEXT,
+                COALESCE(m.item_name, i.name), NULL, m.quantity, COALESCE(m.item_unit, i.unit), m.notes, m.movement_type
+           FROM public.stock_movements m
+           LEFT JOIN public.inventory_items i ON i.id = m.inventory_id
+           LEFT JOIN public.users u ON u.id = m.user_id
+          ORDER BY m.created_at DESC LIMIT v_limit)
+        UNION ALL
+        (SELECT 'expense', 'kas', e.created_at, u.email, e.id::TEXT, e.description,
+                e.amount, NULL, NULL, NULL, CASE WHEN e.paid_from_cash THEN 'cash' END
+           FROM public.expenses e
+           LEFT JOIN public.users u ON u.id = e.created_by
+          ORDER BY e.created_at DESC LIMIT v_limit)
+    )
+    SELECT COALESCE(json_agg(a ORDER BY a.occurred_at DESC), '[]'::JSON) INTO v_result
+      FROM (
+          SELECT * FROM activity
+           WHERE p_category IS NULL OR category = p_category
+           ORDER BY occurred_at DESC
+           LIMIT v_limit
+      ) a;
+
+    RETURN v_result;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 3. Batas pesanan customer di create_order
+-- ------------------------------------------------------------------------------
+-- Customer hanya dapat membuat pesanan lewat create_order, karena semua validasi
+-- (harga resmi, ketersediaan, batas pesanan) ada di sana.
+DROP POLICY IF EXISTS "Customers can create own orders" ON public.orders;
+DROP POLICY IF EXISTS "Customers can add items to own pending orders" ON public.order_items;
+
+CREATE OR REPLACE FUNCTION public.create_order(
+    p_items JSONB,
+    p_customer_name TEXT,
+    p_order_type TEXT,
+    p_payment_method TEXT,
+    p_notes TEXT DEFAULT NULL
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_is_staff BOOLEAN := public.is_staff();
+    v_item JSONB;
+    v_qty INTEGER;
+    v_product public.products%ROWTYPE;
+    v_total NUMERIC := 0;
+    v_customer TEXT := NULLIF(btrim(p_customer_name), '');
+    v_order public.orders%ROWTYPE;
+    v_blocking TEXT;
+BEGIN
+    -- SECURITY DEFINER: satu-satunya pintu pembuatan order (customer tidak dapat INSERT langsung);
+    -- trigger (sif, gerbang pembayaran, nomor order, batas bayar) tetap berlaku.
+    IF NOT v_is_staff AND NOT public.is_active_customer() THEN
+        RAISE EXCEPTION 'Akun ini tidak diizinkan membuat pesanan.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'Keranjang belanja masih kosong.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NOT v_is_staff AND v_customer IS NULL THEN
+        RAISE EXCEPTION 'Nama pemesan wajib diisi.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Validasi item & hitung total dari harga resmi produk.
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_items) LOOP
+        v_qty := (v_item ->> 'quantity')::INTEGER;
+        IF v_qty IS NULL OR v_qty <= 0 THEN
+            RAISE EXCEPTION 'Jumlah item tidak valid.' USING ERRCODE = 'check_violation';
+        END IF;
+
+        SELECT p.* INTO v_product
+          FROM public.products p
+         WHERE p.id = (v_item ->> 'product_id')::UUID
+           AND p.is_active = true
+           AND p.status = 'Tersedia';
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Ada menu di keranjang yang sudah tidak tersedia. Muat ulang menu lalu coba lagi.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        v_total := v_total + v_product.price * v_qty;
+    END LOOP;
+
+    -- Batas pesanan customer (POS kasir tidak dibatasi). Pasangan: lib/customer-order-logic.ts.
+    IF NOT v_is_staff THEN
+        -- Kunci per customer agar dua checkout bersamaan tidak lolos berdua.
+        PERFORM pg_advisory_xact_lock(hashtext('create_order:' || auth.uid()::TEXT));
+
+        SELECT o.order_number INTO v_blocking
+          FROM public.orders o
+         WHERE o.user_id = auth.uid()
+           AND o.order_status = 'Pending'
+           AND o.payment_status = 'Pending'
+           AND (o.payment_due_at IS NULL OR o.payment_due_at > NOW())
+         LIMIT 1;
+        IF v_blocking IS NOT NULL THEN
+            RAISE EXCEPTION 'Anda masih punya pesanan % yang belum dibayar. Bayar di kasir atau batalkan dulu sebelum membuat pesanan baru.', v_blocking
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        IF (SELECT COUNT(DISTINCT i.value ->> 'product_id') FROM jsonb_array_elements(p_items) AS i) > 10 THEN
+            RAISE EXCEPTION 'Maksimal 10 menu berbeda per pesanan.' USING ERRCODE = 'check_violation';
+        END IF;
+
+        IF EXISTS (
+            SELECT 1 FROM jsonb_array_elements(p_items) AS i
+             GROUP BY i.value ->> 'product_id'
+            HAVING SUM((i.value ->> 'quantity')::INTEGER) > 99
+        ) THEN
+            RAISE EXCEPTION 'Jumlah per menu maksimal 99 per pesanan.' USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    INSERT INTO public.orders
+        (user_id, cashier_name, customer_name, total_amount, payment_method,
+         payment_status, order_status, order_type, notes)
+    VALUES (
+        auth.uid(),
+        CASE WHEN v_is_staff THEN (SELECT email FROM public.users WHERE id = auth.uid()) END,
+        COALESCE(v_customer, 'Pelanggan Umum'),
+        v_total,
+        p_payment_method,
+        CASE WHEN v_is_staff THEN 'Paid' ELSE 'Pending' END,
+        CASE WHEN v_is_staff THEN 'Processing' ELSE 'Pending' END,
+        p_order_type,
+        NULLIF(btrim(p_notes), '')
+    )
+    RETURNING * INTO v_order;
+
+    INSERT INTO public.order_items (order_id, product_id, product_name, unit_price, quantity, subtotal, notes)
+    SELECT v_order.id, p.id, p.name, p.price, (i.value ->> 'quantity')::INTEGER,
+           p.price * (i.value ->> 'quantity')::INTEGER, NULLIF(btrim(i.value ->> 'notes'), '')
+      FROM jsonb_array_elements(p_items) AS i
+      JOIN public.products p ON p.id = (i.value ->> 'product_id')::UUID;
+
+    RETURN json_build_object(
+        'id', v_order.id,
+        'order_number', v_order.order_number,
+        'total_amount', v_order.total_amount,
+        'order_status', v_order.order_status,
+        'payment_status', v_order.payment_status,
+        'created_at', v_order.created_at,
+        'payment_due_at', v_order.payment_due_at
+    );
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- Hak eksekusi
+-- ------------------------------------------------------------------------------
+REVOKE EXECUTE ON FUNCTION public.get_recent_activity(INTEGER, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_recent_activity(INTEGER, TEXT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.guard_order_payment_correction() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+
+-- ==============================================================================
+-- 20. PEMBAYARAN QRIS ONLINE (MIDTRANS SNAP)
+-- ==============================================================================
+-- ------------------------------------------------------------------------------
+-- 1. Kolom kanal & data gateway
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.orders
+    ADD COLUMN IF NOT EXISTS payment_channel TEXT NOT NULL DEFAULT 'Kasir',
+    ADD COLUMN IF NOT EXISTS gateway_status TEXT,
+    ADD COLUMN IF NOT EXISTS gateway_payment_type TEXT,
+    ADD COLUMN IF NOT EXISTS gateway_transaction_id TEXT,
+    ADD COLUMN IF NOT EXISTS gateway_redirect_url TEXT,
+    ADD COLUMN IF NOT EXISTS gateway_updated_at TIMESTAMPTZ;
+
+ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_payment_channel_check;
+ALTER TABLE public.orders ADD CONSTRAINT orders_payment_channel_check CHECK (payment_channel IN ('Kasir', 'Online'));
+
+CREATE OR REPLACE FUNCTION public.online_payment_timeout()
+RETURNS INTERVAL
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public
+AS $$ SELECT INTERVAL '3 minutes' $$;
+
+-- Batas bayar per kanal; kanal & data gateway hanya diubah proses sistem.
+CREATE OR REPLACE FUNCTION public.set_order_payment_due()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.order_status = 'Pending' AND NEW.payment_status = 'Pending' THEN
+            NEW.payment_due_at := COALESCE(NEW.created_at, NOW())
+                + CASE WHEN NEW.payment_channel = 'Online' THEN public.online_payment_timeout()
+                       ELSE public.customer_payment_timeout() END;
+        ELSE
+            NEW.payment_due_at := NULL;
+        END IF;
+        IF auth.uid() IS NOT NULL THEN
+            NEW.gateway_status := NULL;
+            NEW.gateway_payment_type := NULL;
+            NEW.gateway_transaction_id := NULL;
+            NEW.gateway_redirect_url := NULL;
+            NEW.gateway_updated_at := NULL;
+        END IF;
+    ELSE
+        IF OLD.payment_due_at IS NOT NULL THEN
+            NEW.payment_due_at := OLD.payment_due_at;
+        END IF;
+        NEW.payment_channel := OLD.payment_channel;
+        IF auth.uid() IS NOT NULL THEN
+            NEW.gateway_status := OLD.gateway_status;
+            NEW.gateway_payment_type := OLD.gateway_payment_type;
+            NEW.gateway_transaction_id := OLD.gateway_transaction_id;
+            NEW.gateway_redirect_url := OLD.gateway_redirect_url;
+            NEW.gateway_updated_at := OLD.gateway_updated_at;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 2. Pelunasan pesanan online hanya lewat Midtrans
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.guard_expired_order_payment()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.payment_status = 'Paid' AND OLD.payment_status IS DISTINCT FROM 'Paid' THEN
+        IF NEW.payment_channel = 'Online' THEN
+            IF auth.uid() IS NOT NULL THEN
+                RAISE EXCEPTION 'Pesanan online dibayar lewat Midtrans; status lunas diperbarui otomatis.'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            -- Proses sistem (webhook terverifikasi): dana sudah diterima Midtrans.
+            RETURN NEW;
+        END IF;
+        IF OLD.order_status = 'Cancelled' THEN
+            RAISE EXCEPTION 'Pesanan % sudah dibatalkan sehingga pembayarannya tidak dapat diterima.', OLD.order_number
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF OLD.payment_due_at IS NOT NULL AND OLD.payment_due_at <= NOW() THEN
+            RAISE EXCEPTION 'Pesanan % sudah kedaluwarsa (tidak dibayar dalam % menit). Buat pesanan baru lewat POS.',
+                OLD.order_number, EXTRACT(EPOCH FROM public.customer_payment_timeout())::INTEGER / 60
+                USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 3. Pembayaran online tidak masuk laci kas (tidak perlu sif terbuka)
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.track_order_payment_shift()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_shift UUID;
+BEGIN
+    -- Uang masuk ke sif saat pembayaran diterima (bukan saat order dibuat).
+    IF NEW.payment_status = 'Paid'
+       AND (TG_OP = 'INSERT' OR OLD.payment_status IS DISTINCT FROM 'Paid') THEN
+        v_shift := public.current_open_shift_id();
+        IF v_shift IS NULL AND NEW.payment_channel IS DISTINCT FROM 'Online' THEN
+            RAISE EXCEPTION 'Sif kasir belum dibuka. Buka sif terlebih dahulu sebelum menerima pembayaran.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        NEW.paid_shift_id := v_shift;
+        NEW.paid_at := NOW();
+    END IF;
+
+    -- Refund mengurangi kas pada sif tempat refund dilakukan (pesanan online: refund lewat Midtrans).
+    IF TG_OP = 'UPDATE' AND NEW.payment_status = 'Refunded'
+       AND OLD.payment_status IS DISTINCT FROM 'Refunded' THEN
+        v_shift := public.current_open_shift_id();
+        IF v_shift IS NULL AND NEW.payment_channel IS DISTINCT FROM 'Online' THEN
+            RAISE EXCEPTION 'Sif kasir belum dibuka. Buka sif terlebih dahulu sebelum memproses refund.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        NEW.refunded_shift_id := v_shift;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 4. Pembatalan otomatis: kasir 15 menit; online menunggu webhook "expire",
+--    dengan cadangan 10 menit setelah batas bila webhook tidak datang.
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.expire_unpaid_orders()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    UPDATE public.orders
+       SET order_status = 'Cancelled',
+           payment_status = CASE WHEN payment_channel = 'Online' THEN 'Failed' ELSE payment_status END,
+           cancelled_at = NOW(),
+           cancellation_reason = CASE
+               WHEN payment_channel = 'Online' THEN 'Otomatis dibatalkan: pembayaran online tidak selesai.'
+               ELSE format('Otomatis dibatalkan: tidak dibayar dalam %s menit.',
+                           EXTRACT(EPOCH FROM public.customer_payment_timeout())::INTEGER / 60)
+           END,
+           updated_at = NOW()
+     WHERE order_status = 'Pending'
+       AND payment_status = 'Pending'
+       AND payment_due_at IS NOT NULL
+       AND payment_due_at + CASE WHEN payment_channel = 'Online' THEN INTERVAL '10 minutes' ELSE INTERVAL '0 minutes' END <= NOW();
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count;
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 5. Customer tidak membatalkan pesanan online (QR kedaluwarsa sendiri)
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.cancel_my_order(p_order_id UUID, p_reason TEXT)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_order public.orders%ROWTYPE;
+BEGIN
+    IF NOT public.is_active_customer() THEN
+        RAISE EXCEPTION 'Hanya customer aktif yang dapat membatalkan pesanannya.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF length(btrim(COALESCE(p_reason, ''))) < 3 THEN
+        RAISE EXCEPTION 'Alasan pembatalan minimal 3 karakter.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT * INTO v_order
+      FROM public.orders
+     WHERE id = p_order_id AND user_id = auth.uid()
+     FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Pesanan tidak ditemukan.' USING ERRCODE = 'no_data_found';
+    END IF;
+
+    IF v_order.order_status <> 'Pending' OR v_order.payment_status <> 'Pending' THEN
+        RAISE EXCEPTION 'Pesanan sudah dibayar atau sedang diproses. Hubungi kasir untuk pembatalan.'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF v_order.payment_channel = 'Online' THEN
+        RAISE EXCEPTION 'Pesanan online dibatalkan otomatis bila tidak dibayar dalam % menit.',
+            EXTRACT(EPOCH FROM public.online_payment_timeout())::INTEGER / 60
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE public.orders
+       SET order_status = 'Cancelled',
+           cancelled_by = auth.uid(),
+           cancelled_at = NOW(),
+           cancellation_reason = btrim(p_reason),
+           updated_at = NOW()
+     WHERE id = v_order.id;
+
+    RETURN json_build_object('id', v_order.id, 'order_number', v_order.order_number, 'order_status', 'Cancelled');
+END;
+$$;
+
+-- ------------------------------------------------------------------------------
+-- 6. Notifikasi Midtrans (dipanggil Edge Function midtrans-webhook, role service_role)
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.apply_midtrans_notification(
+    p_order_id UUID,
+    p_transaction_status TEXT,
+    p_fraud_status TEXT,
+    p_gross_amount NUMERIC,
+    p_payment_type TEXT,
+    p_transaction_id TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_order public.orders%ROWTYPE;
+    v_outcome TEXT;
+BEGIN
+    SELECT * INTO v_order FROM public.orders WHERE id = p_order_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'not_found';
+    END IF;
+    IF v_order.payment_channel <> 'Online' THEN
+        RETURN 'not_online';
+    END IF;
+
+    UPDATE public.orders
+       SET gateway_status = p_transaction_status,
+           gateway_payment_type = COALESCE(p_payment_type, gateway_payment_type),
+           gateway_transaction_id = COALESCE(p_transaction_id, gateway_transaction_id),
+           gateway_updated_at = NOW()
+     WHERE id = v_order.id;
+
+    v_outcome := CASE
+        WHEN p_transaction_status = 'settlement' THEN 'paid'
+        WHEN p_transaction_status = 'capture' AND COALESCE(p_fraud_status, 'accept') = 'accept' THEN 'paid'
+        WHEN p_transaction_status IN ('deny', 'cancel', 'expire', 'failure', 'capture') THEN 'failed'
+        WHEN p_transaction_status = 'pending' THEN 'pending'
+        ELSE 'ignore'
+    END;
+
+    IF v_outcome = 'paid' THEN
+        IF ROUND(p_gross_amount) <> ROUND(v_order.total_amount) THEN
+            UPDATE public.orders
+               SET notes = concat_ws(' | ', NULLIF(notes, ''),
+                       format('Nominal Midtrans %s tidak sama dengan total %s — periksa manual.', p_gross_amount, v_order.total_amount))
+             WHERE id = v_order.id;
+            RETURN 'amount_mismatch';
+        END IF;
+        IF v_order.payment_status = 'Paid' THEN
+            RETURN 'already_paid';
+        END IF;
+        IF v_order.order_status = 'Cancelled' THEN
+            UPDATE public.orders
+               SET notes = concat_ws(' | ', NULLIF(notes, ''),
+                       'Dana online diterima setelah pesanan dibatalkan — lakukan refund manual lewat Midtrans.')
+             WHERE id = v_order.id;
+            RETURN 'paid_after_cancel';
+        END IF;
+        UPDATE public.orders
+           SET payment_status = 'Paid',
+               order_status = CASE WHEN order_status = 'Pending' THEN 'Processing' ELSE order_status END,
+               updated_at = NOW()
+         WHERE id = v_order.id;
+        RETURN 'paid';
+    END IF;
+
+    IF v_outcome = 'failed' AND v_order.order_status = 'Pending' AND v_order.payment_status = 'Pending' THEN
+        UPDATE public.orders
+           SET order_status = 'Cancelled',
+               payment_status = 'Failed',
+               cancelled_at = NOW(),
+               cancellation_reason = format('Pembayaran online tidak selesai (%s).', p_transaction_status),
+               updated_at = NOW()
+         WHERE id = v_order.id;
+        RETURN 'cancelled';
+    END IF;
+
+    RETURN v_outcome;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.apply_midtrans_notification(UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+DO $do$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        GRANT EXECUTE ON FUNCTION public.apply_midtrans_notification(UUID, TEXT, TEXT, NUMERIC, TEXT, TEXT) TO service_role;
+    END IF;
+END
+$do$;
+
+-- ------------------------------------------------------------------------------
+-- 7. create_order dengan kanal pembayaran
+-- ------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT);
+
+CREATE OR REPLACE FUNCTION public.create_order(
+    p_items JSONB,
+    p_customer_name TEXT,
+    p_order_type TEXT,
+    p_payment_method TEXT,
+    p_notes TEXT DEFAULT NULL,
+    p_payment_channel TEXT DEFAULT 'Kasir'
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_is_staff BOOLEAN := public.is_staff();
+    v_item JSONB;
+    v_qty INTEGER;
+    v_product public.products%ROWTYPE;
+    v_total NUMERIC := 0;
+    v_customer TEXT := NULLIF(btrim(p_customer_name), '');
+    v_order public.orders%ROWTYPE;
+    v_blocking TEXT;
+    v_channel TEXT := COALESCE(NULLIF(btrim(p_payment_channel), ''), 'Kasir');
+BEGIN
+    -- SECURITY DEFINER: satu-satunya pintu pembuatan order (customer tidak dapat INSERT langsung);
+    -- trigger (sif, gerbang pembayaran, nomor order, batas bayar) tetap berlaku.
+    IF NOT v_is_staff AND NOT public.is_active_customer() THEN
+        RAISE EXCEPTION 'Akun ini tidak diizinkan membuat pesanan.' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'Keranjang belanja masih kosong.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF NOT v_is_staff AND v_customer IS NULL THEN
+        RAISE EXCEPTION 'Nama pemesan wajib diisi.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Kanal pembayaran: 'Kasir' (bayar di kasir) atau 'Online' (QRIS lewat Midtrans, khusus customer).
+    IF v_channel NOT IN ('Kasir', 'Online') THEN
+        RAISE EXCEPTION 'Kanal pembayaran tidak valid.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_channel = 'Online' AND v_is_staff THEN
+        RAISE EXCEPTION 'POS tidak memakai pembayaran online.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_channel = 'Online' AND p_payment_method <> 'QRIS' THEN
+        RAISE EXCEPTION 'Pembayaran online hanya dengan QRIS.' USING ERRCODE = 'check_violation';
+    END IF;
+
+    -- Validasi item & hitung total dari harga resmi produk.
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_items) LOOP
+        v_qty := (v_item ->> 'quantity')::INTEGER;
+        IF v_qty IS NULL OR v_qty <= 0 THEN
+            RAISE EXCEPTION 'Jumlah item tidak valid.' USING ERRCODE = 'check_violation';
+        END IF;
+
+        SELECT p.* INTO v_product
+          FROM public.products p
+         WHERE p.id = (v_item ->> 'product_id')::UUID
+           AND p.is_active = true
+           AND p.status = 'Tersedia';
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Ada menu di keranjang yang sudah tidak tersedia. Muat ulang menu lalu coba lagi.'
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        v_total := v_total + v_product.price * v_qty;
+    END LOOP;
+
+    -- Batas pesanan customer (POS kasir tidak dibatasi). Pasangan: lib/customer-order-logic.ts.
+    IF NOT v_is_staff THEN
+        -- Kunci per customer agar dua checkout bersamaan tidak lolos berdua.
+        PERFORM pg_advisory_xact_lock(hashtext('create_order:' || auth.uid()::TEXT));
+
+        SELECT o.order_number INTO v_blocking
+          FROM public.orders o
+         WHERE o.user_id = auth.uid()
+           AND o.order_status = 'Pending'
+           AND o.payment_status = 'Pending'
+           AND (o.payment_due_at IS NULL OR o.payment_due_at > NOW())
+         LIMIT 1;
+        IF v_blocking IS NOT NULL THEN
+            RAISE EXCEPTION 'Anda masih punya pesanan % yang belum dibayar. Bayar di kasir atau batalkan dulu sebelum membuat pesanan baru.', v_blocking
+                USING ERRCODE = 'check_violation';
+        END IF;
+
+        IF (SELECT COUNT(DISTINCT i.value ->> 'product_id') FROM jsonb_array_elements(p_items) AS i) > 10 THEN
+            RAISE EXCEPTION 'Maksimal 10 menu berbeda per pesanan.' USING ERRCODE = 'check_violation';
+        END IF;
+
+        IF EXISTS (
+            SELECT 1 FROM jsonb_array_elements(p_items) AS i
+             GROUP BY i.value ->> 'product_id'
+            HAVING SUM((i.value ->> 'quantity')::INTEGER) > 99
+        ) THEN
+            RAISE EXCEPTION 'Jumlah per menu maksimal 99 per pesanan.' USING ERRCODE = 'check_violation';
+        END IF;
+    END IF;
+
+    INSERT INTO public.orders
+        (user_id, cashier_name, customer_name, total_amount, payment_method,
+         payment_status, order_status, order_type, notes, payment_channel)
+    VALUES (
+        auth.uid(),
+        CASE WHEN v_is_staff THEN (SELECT email FROM public.users WHERE id = auth.uid()) END,
+        COALESCE(v_customer, 'Pelanggan Umum'),
+        v_total,
+        p_payment_method,
+        CASE WHEN v_is_staff THEN 'Paid' ELSE 'Pending' END,
+        CASE WHEN v_is_staff THEN 'Processing' ELSE 'Pending' END,
+        p_order_type,
+        NULLIF(btrim(p_notes), ''),
+        v_channel
+    )
+    RETURNING * INTO v_order;
+
+    INSERT INTO public.order_items (order_id, product_id, product_name, unit_price, quantity, subtotal, notes)
+    SELECT v_order.id, p.id, p.name, p.price, (i.value ->> 'quantity')::INTEGER,
+           p.price * (i.value ->> 'quantity')::INTEGER, NULLIF(btrim(i.value ->> 'notes'), '')
+      FROM jsonb_array_elements(p_items) AS i
+      JOIN public.products p ON p.id = (i.value ->> 'product_id')::UUID;
+
+    RETURN json_build_object(
+        'id', v_order.id,
+        'order_number', v_order.order_number,
+        'total_amount', v_order.total_amount,
+        'order_status', v_order.order_status,
+        'payment_status', v_order.payment_status,
+        'created_at', v_order.created_at,
+        'payment_due_at', v_order.payment_due_at,
+        'payment_channel', v_order.payment_channel
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_order(JSONB, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.online_payment_timeout() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.online_payment_timeout() TO authenticated;
 
 NOTIFY pgrst, 'reload schema';

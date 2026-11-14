@@ -84,6 +84,12 @@ export interface OrderRecord {
   cancelled_by?: string | null;
   cancelled_at?: string | null;
   cancellation_reason?: string | null;
+  /** Waktu pembayaran diterima (diisi database). Dasar pengakuan omzet. */
+  paid_at?: string | null;
+  /** Batas bayar pesanan customer (created_at + 15 menit, diisi database). */
+  payment_due_at?: string | null;
+  /** 'Kasir' (bayar di kasir) atau 'Online' (QRIS online lewat Midtrans). */
+  payment_channel?: 'Kasir' | 'Online';
   created_at: string;
   updated_at?: string;
 }
@@ -187,17 +193,30 @@ export function canTransitionOrderStatus(
  * Hanya untuk order aktif (bukan Completed/Cancelled) yang pembayarannya masih Pending.
  */
 export function canConfirmPayment(
-  order: Pick<OrderRecord, 'order_status' | 'payment_status'>,
-  userRole: StaffOrCustomer
+  order: Pick<OrderRecord, 'order_status' | 'payment_status' | 'payment_due_at' | 'payment_channel'>,
+  userRole: StaffOrCustomer,
+  now?: Date
 ): { allowed: boolean; reason?: string } {
   if (userRole !== 'Admin' && userRole !== 'Kasir') {
     return { allowed: false, reason: 'Hanya Admin dan Kasir yang dapat mengonfirmasi pembayaran.' };
+  }
+  if (order.payment_channel === 'Online') {
+    return {
+      allowed: false,
+      reason: 'Pesanan online dibayar lewat Midtrans dan terkonfirmasi otomatis setelah lunas.',
+    };
   }
   if (order.order_status === 'Cancelled' || order.order_status === 'Completed') {
     return { allowed: false, reason: 'Pembayaran tidak dapat dikonfirmasi untuk pesanan yang sudah ditutup.' };
   }
   if (order.payment_status !== 'Pending') {
     return { allowed: false, reason: 'Pembayaran pesanan ini sudah tidak berstatus Pending.' };
+  }
+  if (now && isPaymentExpired(order, now)) {
+    return {
+      allowed: false,
+      reason: `Pesanan sudah kedaluwarsa (tidak dibayar dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit). Buat pesanan baru lewat POS.`,
+    };
   }
   return { allowed: true };
 }
@@ -373,10 +392,17 @@ export function getOrderHistoryStartISO(
  * Setelah dibayar/diproses, pembatalan (dan refund) dilakukan oleh Kasir/Admin.
  */
 export function canCustomerCancelOrder(
-  order: Pick<OrderRecord, 'order_status' | 'payment_status'>
+  order: Pick<OrderRecord, 'order_status' | 'payment_status' | 'payment_channel'>
 ): { allowed: boolean; reason?: string } {
   if (order.order_status === 'Cancelled') {
     return { allowed: false, reason: 'Pesanan ini sudah dibatalkan.' };
+  }
+  if (order.payment_channel === 'Online' && order.payment_status === 'Pending') {
+    // Mencegah kasus dibatalkan lalu QR tetap dibayar; QR kedaluwarsa sendiri.
+    return {
+      allowed: false,
+      reason: `Pesanan online dibatalkan otomatis bila tidak dibayar dalam ${ONLINE_PAYMENT_TIMEOUT_MINUTES} menit.`,
+    };
   }
   if (order.order_status !== 'Pending' || order.payment_status !== 'Pending') {
     return {
@@ -406,4 +432,73 @@ export function canCorrectPaymentMethod(
     return { allowed: false, reason: 'Metode pembayaran baru sama dengan yang tercatat.' };
   }
   return { allowed: true };
+}
+
+// ----------------------------------------------------------------------------
+// Batas waktu pembayaran pesanan customer & pengakuan omzet (audit iterasi 4)
+// ----------------------------------------------------------------------------
+
+/** Pesanan customer yang belum dibayar dibatalkan otomatis setelah batas ini. */
+export const CUSTOMER_PAYMENT_TIMEOUT_MINUTES = 15;
+
+/**
+ * Batas bayar QRIS online (Midtrans). Pasangan: public.online_payment_timeout() &
+ * supabase/functions/_shared/midtrans.ts — ubah ketiganya bersamaan.
+ */
+export const ONLINE_PAYMENT_TIMEOUT_MINUTES = 3;
+
+/** Alasan pembatalan otomatis — harus sama dengan public.expire_unpaid_orders(). */
+export const AUTO_CANCEL_REASON = `Otomatis dibatalkan: tidak dibayar dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit.`;
+
+type PaymentDeadlineOrder = Pick<OrderRecord, 'order_status' | 'payment_status' | 'payment_due_at'>;
+
+/** Pesanan customer yang masih menunggu dibayar di kasir. */
+export function isAwaitingCustomerPayment(order: Pick<OrderRecord, 'order_status' | 'payment_status'>): boolean {
+  return order.order_status === 'Pending' && order.payment_status === 'Pending';
+}
+
+/** Sisa waktu bayar dalam milidetik (boleh negatif), atau null bila tidak sedang menunggu bayar. */
+export function getPaymentTimeLeftMs(order: PaymentDeadlineOrder, now: Date = new Date()): number | null {
+  if (!isAwaitingCustomerPayment(order) || !order.payment_due_at) return null;
+  const due = new Date(order.payment_due_at).getTime();
+  if (Number.isNaN(due)) return null;
+  return due - now.getTime();
+}
+
+/** Batas bayar sudah lewat (database akan/sudah membatalkannya). */
+export function isPaymentExpired(order: PaymentDeadlineOrder, now: Date = new Date()): boolean {
+  const left = getPaymentTimeLeftMs(order, now);
+  return left !== null && left <= 0;
+}
+
+/** Hitung mundur "mm:ss", dibulatkan ke atas per detik. */
+export function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+/** Omzet diakui saat uang diterima; data lama tanpa paid_at memakai waktu order dibuat. */
+export function getRevenueTimestamp(order: { paid_at?: string | null; created_at: string }): string {
+  return order.paid_at || order.created_at;
+}
+
+/** Keterangan pembatalan untuk customer. */
+export function describeCancellation(
+  order: Pick<OrderRecord, 'cancelled_by' | 'cancellation_reason'>,
+  viewerUserId?: string | null
+): { title: string; detail: string } {
+  const reason = (order.cancellation_reason || '').trim();
+  if (!order.cancelled_by && reason === AUTO_CANCEL_REASON) {
+    return {
+      title: 'Dibatalkan otomatis',
+      detail: `Pesanan tidak dibayar dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit. Silakan pesan kembali bila masih ingin membeli.`,
+    };
+  }
+  if (!order.cancelled_by && (reason.startsWith('Otomatis dibatalkan') || reason.startsWith('Pembayaran online'))) {
+    return { title: 'Dibatalkan otomatis', detail: `${reason} Silakan pesan kembali bila masih ingin membeli.` };
+  }
+  const title = viewerUserId && order.cancelled_by === viewerUserId ? 'Dibatalkan oleh Anda' : 'Dibatalkan oleh kasir';
+  return { title, detail: reason ? `Alasan: ${reason}` : 'Pesanan ini telah dibatalkan.' };
 }

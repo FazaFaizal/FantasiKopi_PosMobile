@@ -69,6 +69,8 @@ Thumbs.db
 
 # AI Agent Configs, Instructions & Skills
 .agents/
+.vscode/
+STRUKTUR_PROYEK_MVC.md
 .prd
 AGENTS.md
 skills-lock.json

@@ -6,12 +6,16 @@ import Package from "lucide-react-native/icons/package";
 import { FloatingTabBar } from "../../components/FloatingNavbar";
 import { SidebarDrawer, AdminSidebarContext } from "../../components/SidebarDrawer";
 import { useAuth } from "../../lib/AuthContext";
+import { IncomingOrderBanner } from "../../components/IncomingOrderBanner";
+import { useAwaitingCustomerOrders } from "../../hooks/useAwaitingCustomerOrders";
 
 export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  // Pesanan customer yang menunggu dibayar: banner realtime + badge menu Pesanan.
+  const awaiting = useAwaitingCustomerOrders(!!user);
 
   return (
     <AdminSidebarContext.Provider
@@ -118,11 +122,18 @@ export default function AdminLayout() {
         onClose={() => setSidebarOpen(false)}
         user={user}
         activeRoute={pathname}
+        badges={{ orders: awaiting.count }}
         onLogout={signOut}
         onNavigate={(route) => {
           setSidebarOpen(false);
           router.replace(route as never);
         }}
+      />
+
+      <IncomingOrderBanner
+        order={awaiting.latest}
+        onDismiss={awaiting.dismissLatest}
+        onOpen={() => router.replace("/(admin)/orders" as never)}
       />
     </AdminSidebarContext.Provider>
   );

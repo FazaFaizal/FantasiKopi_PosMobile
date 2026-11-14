@@ -100,8 +100,13 @@ export function ProfileScreen({ onOpenSidebar, backTo }: ProfileScreenProps) {
               </View>
               <View className="flex-1">
                 <Text className="font-heading-semibold text-text text-base" numberOfLines={1}>
-                  {user?.email || '-'}
+                  {user?.full_name || user?.email || '-'}
                 </Text>
+                {user?.full_name ? (
+                  <Text className="font-body text-muted text-xs" numberOfLines={1}>
+                    {user.email}
+                  </Text>
+                ) : null}
                 <View className="flex-row items-center mt-1 gap-1.5">
                   <Badge label={user?.role || '-'} tone={roleTone} />
                   <Badge label={user?.status || '-'} tone={user?.status === 'Aktif' ? 'success' : 'danger'} />

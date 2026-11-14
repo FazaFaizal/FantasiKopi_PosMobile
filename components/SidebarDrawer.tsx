@@ -179,6 +179,8 @@ export interface SidebarDrawerProps {
     main: SidebarNavItem[];
     management?: SidebarNavItem[];
   };
+  /** Angka kecil di samping menu, mis. { orders: 2 } = 2 pesanan menunggu pembayaran. */
+  badges?: Record<string, number>;
 }
 
 export const AdminSidebarContext = React.createContext<{
@@ -213,6 +215,7 @@ export function SidebarDrawer({
   activeRoute = "/(admin)/dashboard",
   onNavigate,
   navItems = SIDEBAR_NAV_ITEMS,
+  badges,
 }: SidebarDrawerProps) {
   const insets = useSafeAreaInsets();
   const { isTablet, orientationMode, setOrientationMode } = useResponsive();
@@ -367,6 +370,7 @@ export function SidebarDrawer({
                       {item.subtitle}
                     </Text>
                   </View>
+                  <NavBadge count={badges?.[item.id]} />
                 </TouchableOpacity>
               );
             })}
@@ -416,6 +420,7 @@ export function SidebarDrawer({
                           {item.subtitle}
                         </Text>
                       </View>
+                      <NavBadge count={badges?.[item.id]} />
                     </TouchableOpacity>
                   );
                 })}
@@ -491,5 +496,17 @@ export function SidebarDrawer({
         />
       </View>
     </Modal>
+  );
+}
+
+function NavBadge({ count }: { count?: number }) {
+  if (!count || count <= 0) return null;
+  return (
+    <View
+      accessibilityLabel={`${count} menunggu`}
+      className="min-w-6 h-6 px-1.5 rounded-full bg-primary items-center justify-center ml-2"
+    >
+      <Text className="font-heading-bold text-white text-xs">{count > 99 ? '99+' : count}</Text>
+    </View>
   );
 }

@@ -23,7 +23,14 @@ import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { Ionicons } from '@expo/vector-icons';
 import { useResponsive } from '../../hooks/useResponsive';
-import { validateStaffAccountPayload } from '../../lib/staff-account-logic';
+import {
+  validateStaffAccountPayload,
+  getLinkableEmployees,
+  validateUserAccountUpdate,
+  describeAccountRelation,
+  STAFF_PASSWORD_MIN_LENGTH,
+} from '../../lib/staff-account-logic';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { canDeleteUserAccount } from '../../lib/auth-logic';
 import { useAuth } from '../../lib/AuthContext';
 
@@ -41,6 +48,9 @@ export default function UserAccountScreen() {
   const { openSidebar } = useAdminSidebar();
   const { user: currentUser } = useAuth();
   const { isTablet, columns } = useResponsive();
+  const router = useRouter();
+  // Dibuka dari menu Karyawan → "Buat Akun Login" (employeeId terpilih).
+  const params = useLocalSearchParams<{ employeeId?: string }>();
   const [users, setUsers] = useState<UserWithEmployee[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +77,7 @@ export default function UserAccountScreen() {
   const [creatingUser, setCreatingUser] = useState(false);
   const [newEmailError, setNewEmailError] = useState('');
   const [newPasswordError, setNewPasswordError] = useState('');
+  const [newEmployeeError, setNewEmployeeError] = useState('');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -107,6 +118,27 @@ export default function UserAccountScreen() {
     fetchData();
   }, [fetchData]);
 
+  const userLinks = users.map((u) => ({ id: u.id, employee_id: u.employee_id }));
+  const isSelf = (u: { id: string } | null) => !!u && !!currentUser && u.id === currentUser.id;
+
+  const openAddModal = useCallback((employeeId: string | null, prefillEmail = '') => {
+    setNewEmail(prefillEmail);
+    setNewPassword('');
+    setNewRole('Kasir');
+    setNewEmployeeId(employeeId);
+    setNewEmailError('');
+    setNewPasswordError('');
+    setNewEmployeeError('');
+    setAddModalVisible(true);
+  }, []);
+
+  useEffect(() => {
+    if (!params.employeeId || employees.length === 0) return;
+    const emp = employees.find((e) => e.id === params.employeeId);
+    if (emp) openAddModal(emp.id, emp.email || '');
+    router.setParams({ employeeId: undefined });
+  }, [params.employeeId, employees, openAddModal, router]);
+
   const openEditModal = (user: UserWithEmployee) => {
     setSelectedUser(user);
     setRole(user.role);
@@ -117,6 +149,18 @@ export default function UserAccountScreen() {
 
   const handleUpdate = async () => {
     if (!selectedUser) return;
+
+    const check = validateUserAccountUpdate({
+      target: selectedUser,
+      next: { role, status, employeeId },
+      currentUserId: currentUser?.id,
+      employees,
+      users: userLinks,
+    });
+    if (!check.allowed) {
+      Alert.alert('Tidak Dapat Disimpan', check.reason || 'Perubahan akun tidak valid.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -145,6 +189,17 @@ export default function UserAccountScreen() {
   const handleToggleStatus = (user: UserWithEmployee) => {
     const isActivating = user.status === 'Nonaktif';
     const newStatus = isActivating ? 'Aktif' : 'Nonaktif';
+    const check = validateUserAccountUpdate({
+      target: user,
+      next: { role: user.role, status: newStatus, employeeId: user.employee_id },
+      currentUserId: currentUser?.id,
+      employees,
+      users: userLinks,
+    });
+    if (!check.allowed) {
+      Alert.alert('Tidak Dapat Diubah', check.reason || 'Status akun tidak dapat diubah.');
+      return;
+    }
 
     Alert.alert(
       isActivating ? 'Aktifkan Akun Pengguna' : 'Nonaktifkan Akun Pengguna',
@@ -180,6 +235,7 @@ export default function UserAccountScreen() {
   const handleCreateInternalUser = async () => {
     setNewEmailError('');
     setNewPasswordError('');
+    setNewEmployeeError('');
     const validation = validateStaffAccountPayload({
       email: newEmail,
       password: newPassword,
@@ -189,6 +245,7 @@ export default function UserAccountScreen() {
     if (!validation.isValid || !validation.value) {
       if (validation.errors.email) setNewEmailError(validation.errors.email);
       if (validation.errors.password) setNewPasswordError(validation.errors.password);
+      if (validation.errors.employee) setNewEmployeeError(validation.errors.employee);
       if (validation.errors.role) Alert.alert('Role Tidak Valid', validation.errors.role);
       return;
     }
@@ -267,6 +324,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
     if (!q) return true;
     return (
       u.email.toLowerCase().includes(q) ||
+      (u.full_name && u.full_name.toLowerCase().includes(q)) ||
       (u.employee && u.employee.name.toLowerCase().includes(q))
     );
   });
@@ -325,12 +383,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
         <View className="bg-background rounded-chip p-2.5 mb-3 border border-line flex-row items-center">
           <Ionicons name="link-outline" size={14} color="#6B7280" />
           <Text className="font-body text-muted text-xs ml-1.5 flex-1" numberOfLines={1}>
-            Relasi Staf:{' '}
-            <Text className="font-body-medium text-text">
-              {item.employee
-                ? `${item.employee.name} (${item.employee.position || 'Staf'})`
-                : 'Akun Mandiri (Customer)'}
-            </Text>
+            <Text className="font-body-medium text-text">{describeAccountRelation(item, item.employee)}</Text>
           </Text>
         </View>
 
@@ -360,7 +413,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
 
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel={`Atur role dan status untuk ${item.email}`}
+            accessibilityLabel={`Atur hak akses untuk ${item.email}`}
             onPress={() => openEditModal(item)}
             className="min-h-11 px-3.5 py-2 rounded-button bg-background border border-line flex-row items-center"
           >
@@ -398,7 +451,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
           <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
-              placeholder="Cari email atau nama staf..."
+              placeholder="Cari email, nama customer, atau karyawan..."
               placeholderTextColor="#6B7280"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -420,15 +473,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
             variant="primary"
             className="w-auto px-4 min-h-12"
             icon={<Ionicons name="person-add" size={16} color="#FFFFFF" />}
-            onPress={() => {
-              setNewEmail('');
-              setNewPassword('');
-              setNewRole('Kasir');
-              setNewEmployeeId(null);
-              setNewEmailError('');
-              setNewPasswordError('');
-              setAddModalVisible(true);
-            }}
+            onPress={() => openAddModal(null)}
           />
         </View>
 
@@ -533,60 +578,81 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                   {selectedUser?.email}
                 </Text>
 
-                {/* Role Choice */}
-                <ChoiceGroup
-                  label="Penetapan Role Akses"
-                  value={role}
-                  onChange={(val) => setRole(val as 'Admin' | 'Kasir' | 'Customer')}
-                  options={[
-                    { value: 'Admin', label: 'Admin' },
-                    { value: 'Kasir', label: 'Kasir' },
-                    { value: 'Customer', label: 'Customer' },
-                  ]}
-                />
-
-                {/* Status Choice */}
-                <ChoiceGroup
-                  label="Status Keaktifan Akun"
-                  value={status}
-                  onChange={(val) => setStatus(val as 'Aktif' | 'Nonaktif')}
-                  options={[
-                    { value: 'Aktif', label: 'Aktif' },
-                    { value: 'Nonaktif', label: 'Nonaktif' },
-                  ]}
-                />
-
-                {/* Relasi Employee */}
-                <View className="mb-6">
-                  <Text className="font-body-medium text-text text-sm mb-2">Tautkan ke Data Pegawai</Text>
-                  <TouchableOpacity
-                    onPress={() => setEmployeeId(null)}
-                    className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
-                      employeeId === null ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
-                    }`}
-                  >
-                    <Text className={`font-body text-xs ${employeeId === null ? 'font-bold text-primary' : 'text-text'}`}>
-                      Tidak Terhubung (Customer Mandiri)
+                {isSelf(selectedUser) && (
+                  <View className="bg-amber-50 border border-amber-200 rounded-chip p-3 mb-4">
+                    <Text className="font-body text-amber-800 text-xs leading-4">
+                      Ini akun Anda sendiri. Role dan status tidak dapat diubah di sini; minta Admin lain bila perlu.
                     </Text>
-                  </TouchableOpacity>
+                  </View>
+                )}
 
-                  {employees.map((emp) => {
-                    const isSelected = employeeId === emp.id;
-                    return (
-                      <TouchableOpacity
-                        key={emp.id}
-                        onPress={() => setEmployeeId(emp.id)}
-                        className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
-                          isSelected ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
-                        }`}
-                      >
-                        <Text className={`font-body text-xs ${isSelected ? 'font-bold text-primary' : 'text-text'}`}>
-                          {emp.name} {emp.position ? `(${emp.position})` : ''} - Status: {emp.status}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                {selectedUser?.role === 'Customer' ? (
+                  <View className="bg-background rounded-chip p-3 mb-4 border border-line">
+                    <Text className="font-body text-muted text-xs leading-4">
+                      Akun Customer terpisah dari data karyawan: role tidak dapat diubah menjadi Admin/Kasir dan
+                      tidak dapat dihubungkan ke karyawan. Akun karyawan dibuat lewat tombol Tambah berdasarkan data karyawan.
+                    </Text>
+                  </View>
+                ) : (
+                  !isSelf(selectedUser) && (
+                    <ChoiceGroup
+                      label="Role Akun Karyawan"
+                      value={role}
+                      onChange={(val) => setRole(val as 'Admin' | 'Kasir')}
+                      options={[
+                        { value: 'Kasir', label: 'Kasir' },
+                        { value: 'Admin', label: 'Admin' },
+                      ]}
+                    />
+                  )
+                )}
+
+                {!isSelf(selectedUser) && (
+                  <ChoiceGroup
+                    label="Status Keaktifan Akun"
+                    value={status}
+                    onChange={(val) => setStatus(val as 'Aktif' | 'Nonaktif')}
+                    options={[
+                      { value: 'Aktif', label: 'Aktif' },
+                      { value: 'Nonaktif', label: 'Nonaktif' },
+                    ]}
+                  />
+                )}
+
+                {/* Relasi karyawan (khusus akun karyawan) */}
+                {selectedUser && selectedUser.role !== 'Customer' && (
+                  <View className="mb-6">
+                    <Text className="font-body-medium text-text text-sm mb-2">Data Karyawan *</Text>
+                    {employees
+                      .filter(
+                        (emp) =>
+                          emp.id === selectedUser.employee_id ||
+                          getLinkableEmployees(employees, userLinks, selectedUser.id).some((e) => e.id === emp.id)
+                      )
+                      .map((emp) => {
+                        const isSelected = employeeId === emp.id;
+                        return (
+                          <TouchableOpacity
+                            key={emp.id}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: isSelected }}
+                            onPress={() => setEmployeeId(emp.id)}
+                            className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
+                              isSelected ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
+                            }`}
+                          >
+                            <Text className={`font-body text-xs ${isSelected ? 'font-bold text-primary' : 'text-text'}`}>
+                              {emp.name} {emp.position ? `(${emp.position})` : ''}
+                              {emp.status === 'Nonaktif' ? ' · Nonaktif' : ''}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    <Text className="font-body text-muted text-[11px] mt-1">
+                      Hanya karyawan aktif yang belum punya akun yang dapat dipilih.
+                    </Text>
+                  </View>
+                )}
 
                 {/* Actions */}
                 <View className="flex-row gap-3 mt-2 mb-2">
@@ -648,7 +714,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                 contentContainerStyle={{ paddingBottom: 48 }}
               >
                 <View className="flex-row justify-between items-center mb-4">
-                  <Text className="font-heading text-text text-xl">Buat Akun Staf Internal</Text>
+                  <Text className="font-heading text-text text-xl">Buat Akun Karyawan</Text>
                   <TouchableOpacity
                     accessibilityRole="button"
                     accessibilityLabel="Tutup dialog"
@@ -676,7 +742,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
 
                 <Input
                   label="Password Akun *"
-                  placeholder="Minimal 6 karakter"
+                  placeholder={`Minimal ${STAFF_PASSWORD_MIN_LENGTH} karakter`}
                   value={newPassword}
                   onChangeText={(t) => {
                     setNewPassword(t);
@@ -698,34 +764,43 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                 />
 
                 <View className="mb-6">
-                  <Text className="font-body-medium text-text text-sm mb-2">Pilih Pegawai Terkait (Opsional)</Text>
-                  <TouchableOpacity
-                    onPress={() => setNewEmployeeId(null)}
-                    className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
-                      newEmployeeId === null ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
-                    }`}
-                  >
-                    <Text className={`font-body text-xs ${newEmployeeId === null ? 'font-bold text-primary' : 'text-text'}`}>
-                      Belum Ditautkan
-                    </Text>
-                  </TouchableOpacity>
-
-                  {employees.map((emp) => {
-                    const isSelected = newEmployeeId === emp.id;
-                    return (
-                      <TouchableOpacity
-                        key={emp.id}
-                        onPress={() => setNewEmployeeId(emp.id)}
-                        className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
-                          isSelected ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
-                        }`}
-                      >
-                        <Text className={`font-body text-xs ${isSelected ? 'font-bold text-primary' : 'text-text'}`}>
-                          {emp.name} {emp.position ? `(${emp.position})` : ''}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                  <Text className="font-body-medium text-text text-sm mb-1">Data Karyawan *</Text>
+                  <Text className="font-body text-muted text-[11px] mb-2">
+                    Akun karyawan dibuat berdasarkan data karyawan. Hanya karyawan aktif yang belum punya akun yang tampil.
+                  </Text>
+                  {getLinkableEmployees(employees, userLinks).length === 0 ? (
+                    <View className="bg-amber-50 border border-amber-200 rounded-chip p-3">
+                      <Text className="font-body text-amber-800 text-xs leading-4">
+                        Belum ada karyawan aktif tanpa akun. Tambahkan data karyawan terlebih dahulu di menu Karyawan.
+                      </Text>
+                    </View>
+                  ) : (
+                    getLinkableEmployees(employees, userLinks).map((emp) => {
+                      const isSelected = newEmployeeId === emp.id;
+                      return (
+                        <TouchableOpacity
+                          key={emp.id}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          onPress={() => {
+                            setNewEmployeeId(emp.id);
+                            setNewEmployeeError('');
+                            if (!newEmail.trim() && emp.email) setNewEmail(emp.email);
+                          }}
+                          className={`min-h-12 p-3.5 rounded-button border mb-2 justify-center ${
+                            isSelected ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
+                          }`}
+                        >
+                          <Text className={`font-body text-xs ${isSelected ? 'font-bold text-primary' : 'text-text'}`}>
+                            {emp.name} {emp.position ? `(${emp.position})` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
+                  {newEmployeeError ? (
+                    <Text className="font-body text-danger text-xs mt-1">{newEmployeeError}</Text>
+                  ) : null}
                 </View>
 
                 <View className="flex-row gap-3 mt-2 mb-2">
@@ -736,7 +811,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                     onPress={() => setAddModalVisible(false)}
                   />
                   <Button
-                    title="Buat Akun Staf"
+                    title="Buat Akun"
                     variant="primary"
                     className="flex-1"
                     isLoading={creatingUser}

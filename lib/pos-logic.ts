@@ -272,6 +272,8 @@ export function buildCreateOrderParams(
     orderType: "Dine In" | "Take Away";
     paymentMethod: PaymentMethod;
     notes?: string | null;
+    /** Khusus pesanan customer: 'Online' = QRIS lewat Midtrans. Default database: 'Kasir'. */
+    paymentChannel?: "Kasir" | "Online";
   }
 ): {
   p_items: { product_id: string; quantity: number; notes: string | null }[];
@@ -279,8 +281,10 @@ export function buildCreateOrderParams(
   p_order_type: "Dine In" | "Take Away";
   p_payment_method: PaymentMethod;
   p_notes: string | null;
+  p_payment_channel?: "Kasir" | "Online";
 } {
   return {
+    ...(options.paymentChannel ? { p_payment_channel: options.paymentChannel } : {}),
     p_items: cart.map((item) => ({
       product_id: item.productId,
       quantity: item.quantity,
@@ -301,4 +305,7 @@ export interface CreatedOrder {
   order_status: string;
   payment_status: string;
   created_at: string;
+  /** Batas bayar (khusus pesanan customer); null untuk order POS yang langsung lunas. */
+  payment_due_at?: string | null;
+  payment_channel?: "Kasir" | "Online";
 }

@@ -134,10 +134,14 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
     try {
       setErrorMessage('');
       const [ordersRes, expensesRes, shiftRes, closedRes] = await Promise.all([
+        // Penjualan diakui saat dibayar (paid_at) — termasuk order kemarin yang baru dibayar hari ini;
+        // order lama tanpa paid_at & order yang menunggu bayar memakai created_at.
         supabase
           .from('orders')
-          .select('payment_method, payment_status, order_status, total_amount, created_at')
-          .gte('created_at', getBusinessDayStartISO(businessToday)),
+          .select('payment_method, payment_status, order_status, total_amount, created_at, paid_at')
+          .or(
+            `paid_at.gte.${getBusinessDayStartISO(businessToday)},and(paid_at.is.null,created_at.gte.${getBusinessDayStartISO(businessToday)})`
+          ),
         supabase
           .from('expenses')
           .select('id, description, category, amount, expense_date, paid_from_cash, stock_movement_id, created_at')

@@ -184,7 +184,7 @@ describe('#2 Pembayaran dikonfirmasi kasir sebelum order diproses', () => {
 // #3 PEMBUATAN AKUN STAF LEWAT EDGE FUNCTION
 // ============================================================================
 describe('#3 Akun staf dibuat lewat Edge Function', () => {
-  const valid = { email: 'kasir@fantasi.id', password: 'rahasia123', role: 'Kasir' as const, employeeId: null };
+  const valid = { email: 'kasir@fantasi.id', password: 'rahasia123', role: 'Kasir' as const, employeeId: 'emp-1' };
 
   it('menerima payload valid dan menormalkan email', () => {
     const r = validateStaffAccountPayload({ ...valid, email: '  Kasir@Fantasi.ID ' });

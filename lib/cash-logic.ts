@@ -7,7 +7,7 @@
  * Semua "hari" memakai zona waktu bisnis (lib/timezone.ts) agar sama dengan database.
  */
 
-import { isRecognizedSale } from './order-logic';
+import { getRevenueTimestamp, isRecognizedSale } from './order-logic';
 import { parseRupiahInput } from './inventory-logic';
 import { ExpenseCategory, validateExpenseInput } from './expense-logic';
 import { getBusinessDateString, toBusinessDateString } from './timezone';
@@ -19,6 +19,8 @@ export interface CashRecapOrder {
   order_status: string;
   total_amount: number;
   created_at: string;
+  /** Waktu pembayaran diterima; penjualan diakui pada hari ini (PRD 21). */
+  paid_at?: string | null;
 }
 
 export interface CashRecapExpense {
@@ -47,8 +49,12 @@ export function calculateDailyCashRecap(
   expenses: CashRecapExpense[],
   businessDate: string
 ): DailyCashRecap {
+  // Penjualan diakui pada hari uangnya diterima (sama dengan sif & laporan);
+  // order yang menunggu pembayaran dihitung menurut hari order dibuat.
   const todaysOrders = (orders || []).filter((o) => toBusinessDateString(o.created_at) === businessDate);
-  const paid = todaysOrders.filter(isRecognizedSale);
+  const paid = (orders || []).filter(
+    (o) => isRecognizedSale(o) && toBusinessDateString(getRevenueTimestamp(o)) === businessDate
+  );
   const cash = paid.filter((o) => o.payment_method === 'Tunai');
   const qris = paid.filter((o) => o.payment_method === 'QRIS');
   const debit = paid.filter((o) => o.payment_method === 'Debit');
