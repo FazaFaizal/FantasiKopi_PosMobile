@@ -72,7 +72,10 @@ Thumbs.db
 .prd
 AGENTS.md
 skills-lock.json
+# Izin Claude Code & koneksi MCP khusus komputer ini (jangan dibagikan)
+.claude/settings.local.json
+.mcp.json
 
 # Temporary artifacts
-/
+/temp_app/
 

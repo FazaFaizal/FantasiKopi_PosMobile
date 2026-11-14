@@ -71,6 +71,46 @@ export default function AdminLayout() {
             tabBarStyle: { display: "none" },
           }}
         />
+        <Tabs.Screen
+          name="orders"
+          options={{
+            title: "Pesanan",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: "Profil Saya",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          }}
+        />
+        <Tabs.Screen
+          name="cash"
+          options={{
+            title: "Kas Harian",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          }}
+        />
+        <Tabs.Screen
+          name="expense"
+          options={{
+            title: "Biaya Operasional",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          }}
+        />
+        <Tabs.Screen
+          name="report"
+          options={{
+            title: "Laporan & Finansial",
+            tabBarItemStyle: { display: "none" },
+            tabBarStyle: { display: "none" },
+          }}
+        />
       </Tabs>
 
       <SidebarDrawer

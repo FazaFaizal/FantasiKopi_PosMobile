@@ -145,7 +145,10 @@ export interface Database {
           current_stock: number;
           min_stock: number;
           notes: string | null;
+          /** Tidak dipakai lagi; digantikan is_active. */
           is_deleted: boolean;
+          /** Bahan nonaktif disembunyikan dari kasir dan tidak bisa dimutasi. Hanya Admin yang mengubah. */
+          is_active: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -157,6 +160,7 @@ export interface Database {
           min_stock?: number;
           notes?: string | null;
           is_deleted?: boolean;
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -168,6 +172,7 @@ export interface Database {
           min_stock?: number;
           notes?: string | null;
           is_deleted?: boolean;
+          is_active?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -224,32 +229,39 @@ export interface Database {
           cashier_name: string | null;
           customer_name: string | null;
           total_amount: number;
-          payment_method: 'Tunai' | 'QRIS';
-          payment_status: 'Pending' | 'Paid' | 'Lunas' | 'Failed' | 'Refunded' | 'Batal';
+          payment_method: 'Tunai' | 'QRIS' | 'Debit';
+          payment_status: 'Pending' | 'Paid' | 'Failed' | 'Refunded';
           order_status: 'Pending' | 'Processing' | 'Ready' | 'Completed' | 'Cancelled';
           order_type: 'Dine In' | 'Take Away';
           notes: string | null;
           cancelled_by: string | null;
           cancelled_at: string | null;
           cancellation_reason: string | null;
+          paid_at: string | null;
+          paid_shift_id: string | null;
+          refunded_shift_id: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          order_number: string;
+          /** Diisi otomatis oleh trigger `assign_order_number` (nilai dari klien diabaikan). */
+          order_number?: string;
           user_id?: string | null;
           cashier_name?: string | null;
           customer_name?: string | null;
           total_amount: number;
-          payment_method: 'Tunai' | 'QRIS';
-          payment_status?: 'Pending' | 'Paid' | 'Lunas' | 'Failed' | 'Refunded' | 'Batal';
+          payment_method: 'Tunai' | 'QRIS' | 'Debit';
+          payment_status?: 'Pending' | 'Paid' | 'Failed' | 'Refunded';
           order_status?: 'Pending' | 'Processing' | 'Ready' | 'Completed' | 'Cancelled';
           order_type?: 'Dine In' | 'Take Away';
           notes?: string | null;
           cancelled_by?: string | null;
           cancelled_at?: string | null;
           cancellation_reason?: string | null;
+          paid_at?: string | null;
+          paid_shift_id?: string | null;
+          refunded_shift_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -260,14 +272,17 @@ export interface Database {
           cashier_name?: string | null;
           customer_name?: string | null;
           total_amount?: number;
-          payment_method?: 'Tunai' | 'QRIS';
-          payment_status?: 'Pending' | 'Paid' | 'Lunas' | 'Failed' | 'Refunded' | 'Batal';
+          payment_method?: 'Tunai' | 'QRIS' | 'Debit';
+          payment_status?: 'Pending' | 'Paid' | 'Failed' | 'Refunded';
           order_status?: 'Pending' | 'Processing' | 'Ready' | 'Completed' | 'Cancelled';
           order_type?: 'Dine In' | 'Take Away';
           notes?: string | null;
           cancelled_by?: string | null;
           cancelled_at?: string | null;
           cancellation_reason?: string | null;
+          paid_at?: string | null;
+          paid_shift_id?: string | null;
+          refunded_shift_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -307,6 +322,71 @@ export interface Database {
           created_at?: string;
         };
       };
+      cash_shifts: {
+        /** Ditulis hanya lewat RPC open_cash_shift / close_cash_shift. */
+        Row: {
+          id: string;
+          status: 'Open' | 'Closed';
+          opened_by: string | null;
+          opened_by_name: string | null;
+          opened_at: string;
+          opening_cash: number;
+          opening_note: string | null;
+          closed_by: string | null;
+          closed_by_name: string | null;
+          closed_at: string | null;
+          expected_cash: number | null;
+          counted_cash: number | null;
+          cash_withdrawn: number;
+          difference: number | null;
+          closing_note: string | null;
+        };
+        Insert: never;
+        Update: never;
+      };
+      expenses: {
+        Row: {
+          id: string;
+          description: string;
+          category: 'Raw Material' | 'Operational' | 'Equipment' | 'Other';
+          amount: number;
+          expense_date: string;
+          created_by: string | null;
+          /** Terisi jika expense dibuat lewat Stock In (record_stock_in). */
+          stock_movement_id: string | null;
+          /** true = dibayar dari kas laci (uang penjualan hari itu). */
+          paid_from_cash: boolean;
+          shift_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          description: string;
+          category: 'Raw Material' | 'Operational' | 'Equipment' | 'Other';
+          amount: number;
+          expense_date?: string;
+          created_by?: string | null;
+          stock_movement_id?: string | null;
+          paid_from_cash?: boolean;
+          shift_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          description?: string;
+          category?: 'Raw Material' | 'Operational' | 'Equipment' | 'Other';
+          amount?: number;
+          expense_date?: string;
+          created_by?: string | null;
+          stock_movement_id?: string | null;
+          paid_from_cash?: boolean;
+          shift_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
     Views: {
       [_ in never]: never;
@@ -319,6 +399,69 @@ export interface Database {
       is_staff: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      get_shift_summary: {
+        Args: { p_shift_id?: string | null };
+        Returns: Record<string, unknown> | null;
+      };
+      open_cash_shift: {
+        Args: { p_opening_cash: number; p_note?: string | null };
+        Returns: Record<string, unknown>;
+      };
+      close_cash_shift: {
+        Args: { p_counted: number; p_withdrawn?: number; p_note?: string | null };
+        Returns: Record<string, unknown>;
+      };
+      business_today: {
+        Args: Record<PropertyKey, never>;
+        Returns: string;
+      };
+      create_order: {
+        Args: {
+          p_items: { product_id: string; quantity: number; notes: string | null }[];
+          p_customer_name: string;
+          p_order_type: 'Dine In' | 'Take Away';
+          p_payment_method: 'Tunai' | 'QRIS' | 'Debit';
+          p_notes?: string | null;
+        };
+        Returns: {
+          id: string;
+          order_number: string;
+          total_amount: number;
+          order_status: string;
+          payment_status: string;
+          created_at: string;
+        };
+      };
+      cancel_my_order: {
+        Args: { p_order_id: string; p_reason: string };
+        Returns: { id: string; order_number: string; order_status: 'Cancelled' };
+      };
+      get_sales_summary: {
+        Args: { p_from?: string | null; p_to?: string | null };
+        Returns: Record<string, unknown> | null;
+      };
+      record_stock_movement: {
+        Args: {
+          p_inventory_id: string;
+          p_movement_type: 'Stock Out' | 'Stock Adjustment';
+          p_quantity: number;
+          p_notes: string;
+        };
+        Returns: { movement_id: string; stock_before: number; stock_after: number };
+      };
+      record_stock_in: {
+        Args: {
+          p_inventory_id: string;
+          p_quantity: number;
+          p_notes?: string | null;
+          p_purchase_amount?: number | null;
+        };
+        Returns: {
+          movement_id: string;
+          expense_id: string | null;
+          stock_after: number;
+        };
       };
     };
     Enums: {
@@ -338,3 +481,5 @@ export type InventoryItem = Database['public']['Tables']['inventory_items']['Row
 export type StockMovement = Database['public']['Tables']['stock_movements']['Row'];
 export type Order = Database['public']['Tables']['orders']['Row'];
 export type OrderItem = Database['public']['Tables']['order_items']['Row'];
+export type Expense = Database['public']['Tables']['expenses']['Row'];
+export type CashShift = Database['public']['Tables']['cash_shifts']['Row'];

@@ -4,9 +4,70 @@
  * Sesuai PRD Iterasi 3 (Section 15, 16, 17, 18, 19).
  */
 
+import { getBusinessDateString, getBusinessDayStartISO, toBusinessDateString } from './timezone';
+
 export type OrderStatus = 'Pending' | 'Processing' | 'Ready' | 'Completed' | 'Cancelled';
 export type OrderType = 'Dine In' | 'Take Away';
-export type PaymentStatus = 'Pending' | 'Paid' | 'Lunas' | 'Failed' | 'Refunded' | 'Batal';
+
+/** Status pembayaran baku (PRD Section 16). Label tampilan: getPaymentStatusMeta. */
+export const PAYMENT_STATUSES = ['Pending', 'Paid', 'Failed', 'Refunded'] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+/** Metode pembayaran (PRD Section 16). Hanya Tunai yang masuk laci kas. */
+export const PAYMENT_METHODS = ['Tunai', 'QRIS', 'Debit'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+type BadgeTone = 'success' | 'danger' | 'neutral' | 'accent' | 'warning';
+
+export function getPaymentMethodMeta(method: PaymentMethod | string): {
+  label: string;
+  isCash: boolean;
+  icon: 'cash-outline' | 'qr-code-outline' | 'card-outline';
+} {
+  switch (method) {
+    case 'Tunai':
+      return { label: 'Tunai', isCash: true, icon: 'cash-outline' };
+    case 'QRIS':
+      return { label: 'QRIS', isCash: false, icon: 'qr-code-outline' };
+    case 'Debit':
+      return { label: 'Debit', isCash: false, icon: 'card-outline' };
+    default:
+      return { label: String(method), isCash: false, icon: 'card-outline' };
+  }
+}
+
+/**
+ * Label pembayaran untuk tampilan. Order belum dibayar yang dibatalkan
+ * tetap berstatus Pending di database, tetapi ditampilkan "Tidak Dibayar".
+ */
+export function getPaymentStatusMeta(
+  paymentStatus: PaymentStatus | string,
+  orderStatus?: OrderStatus | string
+): { label: string; tone: BadgeTone } {
+  switch (paymentStatus) {
+    case 'Paid':
+      return { label: 'Lunas', tone: 'success' };
+    case 'Refunded':
+      return { label: 'Dikembalikan', tone: 'danger' };
+    case 'Failed':
+      return { label: 'Gagal', tone: 'danger' };
+    case 'Pending':
+      return orderStatus === 'Cancelled'
+        ? { label: 'Tidak Dibayar', tone: 'neutral' }
+        : { label: 'Belum Dibayar', tone: 'warning' };
+    default:
+      return { label: String(paymentStatus), tone: 'neutral' };
+  }
+}
+
+/**
+ * Status pembayaran setelah order dibatalkan (PRD 17.1):
+ * sudah Paid → Refunded; selain itu tidak berubah (tidak ada uang yang berpindah).
+ */
+export function getCancellationPaymentStatus(current: PaymentStatus | string): PaymentStatus {
+  if (current === 'Paid') return 'Refunded';
+  return (PAYMENT_STATUSES as readonly string[]).includes(current) ? (current as PaymentStatus) : 'Pending';
+}
 
 export interface OrderRecord {
   id: string;
@@ -15,7 +76,7 @@ export interface OrderRecord {
   cashier_name?: string | null;
   customer_name?: string | null;
   total_amount: number;
-  payment_method: 'Tunai' | 'QRIS';
+  payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   order_status: OrderStatus;
   order_type?: OrderType;
@@ -27,6 +88,28 @@ export interface OrderRecord {
   updated_at?: string;
 }
 
+type StaffOrCustomer = 'Admin' | 'Kasir' | 'Customer';
+
+/** Status order yang hanya boleh dicapai bila pembayaran sudah lunas. */
+const PAYMENT_GATED_STATUSES: OrderStatus[] = ['Processing', 'Ready', 'Completed'];
+
+/** Pembayaran dianggap lunas hanya bila `Paid`. */
+export function isPaymentSettled(status: PaymentStatus | string | null | undefined): boolean {
+  return status === 'Paid';
+}
+
+/**
+ * Aturan pengakuan omzet (PRD Section 21 & 22, revisi):
+ * Order diakui sebagai penjualan saat pembayarannya lunas dan tidak dibatalkan,
+ * terlepas dari status dapur (Processing / Ready / Completed).
+ */
+export function isRecognizedSale(order: {
+  order_status?: OrderStatus | string | null;
+  payment_status?: PaymentStatus | string | null;
+}): boolean {
+  return order.order_status !== 'Cancelled' && isPaymentSettled(order.payment_status);
+}
+
 /**
  * Validasi apakah transisi alur status pesanan diizinkan.
  * Sesuai PRD Section 17:
@@ -34,11 +117,14 @@ export interface OrderRecord {
  * - Perubahan alur normal hanya dapat dilakukan oleh Kasir atau Admin.
  * - Customer tidak boleh mengubah status pesanan.
  * - Pesanan yang sudah Completed atau Cancelled tidak dapat diubah statusnya lagi.
+ * - Order tidak boleh maju ke Processing/Ready/Completed sebelum pembayaran lunas
+ *   (jika `paymentStatus` diberikan; database juga menegakkan aturan ini).
  */
 export function canTransitionOrderStatus(
   current: OrderStatus,
   target: OrderStatus,
-  userRole: 'Admin' | 'Kasir' | 'Customer'
+  userRole: StaffOrCustomer,
+  paymentStatus?: PaymentStatus
 ): { allowed: boolean; reason?: string } {
   if (userRole === 'Customer') {
     return {
@@ -82,7 +168,63 @@ export function canTransitionOrderStatus(
     };
   }
 
+  if (
+    paymentStatus !== undefined &&
+    PAYMENT_GATED_STATUSES.includes(target) &&
+    !isPaymentSettled(paymentStatus)
+  ) {
+    return {
+      allowed: false,
+      reason: 'Pembayaran belum dikonfirmasi. Konfirmasi pembayaran terlebih dahulu sebelum pesanan diproses.',
+    };
+  }
+
   return { allowed: true };
+}
+
+/**
+ * Apakah staf boleh mengonfirmasi pembayaran sebuah order.
+ * Hanya untuk order aktif (bukan Completed/Cancelled) yang pembayarannya masih Pending.
+ */
+export function canConfirmPayment(
+  order: Pick<OrderRecord, 'order_status' | 'payment_status'>,
+  userRole: StaffOrCustomer
+): { allowed: boolean; reason?: string } {
+  if (userRole !== 'Admin' && userRole !== 'Kasir') {
+    return { allowed: false, reason: 'Hanya Admin dan Kasir yang dapat mengonfirmasi pembayaran.' };
+  }
+  if (order.order_status === 'Cancelled' || order.order_status === 'Completed') {
+    return { allowed: false, reason: 'Pembayaran tidak dapat dikonfirmasi untuk pesanan yang sudah ditutup.' };
+  }
+  if (order.payment_status !== 'Pending') {
+    return { allowed: false, reason: 'Pembayaran pesanan ini sudah tidak berstatus Pending.' };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Payload update saat kasir mengonfirmasi pembayaran.
+ * Untuk order Pending, konfirmasi sekaligus menerima order (masuk Processing)
+ * agar kasir cukup satu kali tekan.
+ */
+export function buildPaymentConfirmationUpdate(
+  order: Pick<OrderRecord, 'order_status'>
+): { payment_status: 'Paid'; order_status: OrderStatus } {
+  return {
+    payment_status: 'Paid',
+    order_status: order.order_status === 'Pending' ? 'Processing' : order.order_status,
+  };
+}
+
+/**
+ * Order yang aman diselesaikan secara massal: status Ready dan sudah lunas.
+ */
+export function getBulkCompletableOrders<T extends Pick<OrderRecord, 'order_status' | 'payment_status'>>(
+  orders: T[]
+): T[] {
+  return (orders || []).filter(
+    (o) => o.order_status === 'Ready' && isPaymentSettled(o.payment_status)
+  );
 }
 
 /**
@@ -173,11 +315,8 @@ export function filterOrderHistory(
       if (isNaN(orderDate.getTime())) return false;
 
       if (dateFilter === 'today') {
-        const isSameDay =
-          orderDate.getFullYear() === now.getFullYear() &&
-          orderDate.getMonth() === now.getMonth() &&
-          orderDate.getDate() === now.getDate();
-        if (!isSameDay) return false;
+        // Hari dihitung menurut zona waktu bisnis (WITA), bukan zona waktu perangkat.
+        if (toBusinessDateString(order.created_at) !== getBusinessDateString(now)) return false;
       } else if (dateFilter === '7days') {
         const diffMs = now.getTime() - orderDate.getTime();
         const diffDays = diffMs / (1000 * 60 * 60 * 24);
@@ -199,9 +338,7 @@ export function filterOrderHistory(
 /**
  * Pemetaan warna/tone Badge status pesanan.
  */
-export function getOrderStatusBadgeTone(
-  status: OrderStatus
-): 'success' | 'danger' | 'neutral' | 'accent' | 'warning' {
+export function getOrderStatusBadgeTone(status: OrderStatus): BadgeTone {
   switch (status) {
     case 'Pending':
       return 'warning';
@@ -216,4 +353,57 @@ export function getOrderStatusBadgeTone(
     default:
       return 'neutral';
   }
+}
+
+/**
+ * Batas bawah created_at untuk query riwayat order (dipakai bersama paginasi keyset).
+ * today = awal hari bisnis (WITA); 7days = 7×24 jam terakhir; all = tanpa batas.
+ */
+export function getOrderHistoryStartISO(
+  dateFilter: 'all' | 'today' | '7days',
+  now: Date = new Date()
+): string | null {
+  if (dateFilter === 'today') return getBusinessDayStartISO(getBusinessDateString(now));
+  if (dateFilter === '7days') return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  return null;
+}
+
+/**
+ * #6: Customer boleh membatalkan pesanannya sendiri selama masih Pending dan belum dibayar.
+ * Setelah dibayar/diproses, pembatalan (dan refund) dilakukan oleh Kasir/Admin.
+ */
+export function canCustomerCancelOrder(
+  order: Pick<OrderRecord, 'order_status' | 'payment_status'>
+): { allowed: boolean; reason?: string } {
+  if (order.order_status === 'Cancelled') {
+    return { allowed: false, reason: 'Pesanan ini sudah dibatalkan.' };
+  }
+  if (order.order_status !== 'Pending' || order.payment_status !== 'Pending') {
+    return {
+      allowed: false,
+      reason: 'Pesanan sudah dibayar atau sedang diproses. Hubungi kasir untuk pembatalan.',
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * PRD 15.1: Admin dapat mengoreksi data Payment, yaitu metode pembayaran order yang
+ * sudah lunas (mis. tercatat Tunai padahal QRIS). Database mencatat koreksinya di catatan order.
+ */
+export function canCorrectPaymentMethod(
+  order: Pick<OrderRecord, 'payment_status' | 'payment_method'>,
+  userRole: StaffOrCustomer,
+  newMethod: PaymentMethod
+): { allowed: boolean; reason?: string } {
+  if (userRole !== 'Admin') {
+    return { allowed: false, reason: 'Hanya Admin yang dapat mengoreksi data pembayaran.' };
+  }
+  if (order.payment_status !== 'Paid') {
+    return { allowed: false, reason: 'Koreksi hanya untuk pesanan yang sudah lunas.' };
+  }
+  if (order.payment_method === newMethod) {
+    return { allowed: false, reason: 'Metode pembayaran baru sama dengan yang tercatat.' };
+  }
+  return { allowed: true };
 }

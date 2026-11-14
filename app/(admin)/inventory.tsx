@@ -21,9 +21,15 @@ import { ChoiceGroup } from '../../components/ChoiceGroup';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
-import { useAuth } from '../../lib/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import { computeStockStatus } from '../../lib/inventory-logic';
+import {
+  computeStockStatus,
+  validateStockInPurchase,
+  buildRecordStockInParams,
+  buildStockMovementParams,
+} from '../../lib/inventory-logic';
+import { formatRupiah } from '../../lib/formatters';
+import { StockInPurchaseFields } from '../../components/StockInPurchaseFields';
 import { useResponsive } from '../../hooks/useResponsive';
 
 export { computeStockStatus };
@@ -32,7 +38,6 @@ type InventoryItem = Database['public']['Tables']['inventory_items']['Row'];
 type StockMovement = Database['public']['Tables']['stock_movements']['Row'];
 
 export default function AdminInventoryScreen() {
-  const { user } = useAuth();
   const { openSidebar } = useAdminSidebar();
   const { isTablet, columns } = useResponsive();
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -58,6 +63,10 @@ export default function AdminInventoryScreen() {
   const [quantity, setQuantity] = useState('');
   const [movementNotes, setMovementNotes] = useState('');
   const [movementError, setMovementError] = useState('');
+  // Stock In sebagai pembelian (#4)
+  const [isPurchase, setIsPurchase] = useState(false);
+  const [purchaseAmountText, setPurchaseAmountText] = useState('');
+  const [purchaseAmountError, setPurchaseAmountError] = useState('');
   const [submittingMovement, setSubmittingMovement] = useState(false);
 
   // Modal 3: Riwayat Pergerakan Stok (History)
@@ -150,7 +159,6 @@ export default function AdminInventoryScreen() {
             current_stock: 0,
             min_stock: numMin,
             notes: notes.trim() || null,
-            is_deleted: false,
           });
 
         if (error) throw error;
@@ -173,73 +181,76 @@ export default function AdminInventoryScreen() {
     setQuantity('');
     setMovementNotes('');
     setMovementError('');
+    setIsPurchase(false);
+    setPurchaseAmountText('');
+    setPurchaseAmountError('');
     setMovementModalVisible(true);
   };
 
   const handleSaveMovement = async () => {
     if (!selectedItemForMovement) return;
     setMovementError('');
+    setPurchaseAmountError('');
 
-    const numQty = Number(quantity);
-    if (!quantity || isNaN(numQty) || numQty <= 0) {
-      setMovementError('Jumlah perubahan harus lebih besar dari 0');
+    // Stock In: mutasi stok + biaya pembelian (opsional) disimpan atomik di database.
+    if (movementType === 'Stock In') {
+      const check = validateStockInPurchase({
+        quantityText: quantity,
+        isPurchase,
+        amountText: purchaseAmountText,
+      });
+      if (!check.isValid || !check.value) {
+        setMovementError(check.errors.quantity || '');
+        setPurchaseAmountError(check.errors.amount || '');
+        return;
+      }
+
+      setSubmittingMovement(true);
+      try {
+        const { error: rpcErr } = await supabase.rpc(
+          'record_stock_in',
+          buildRecordStockInParams(selectedItemForMovement.id, check.value, movementNotes)
+        );
+        if (rpcErr) throw rpcErr;
+
+        Alert.alert(
+          'Sukses',
+          check.value.purchaseAmount
+            ? `Stock In dicatat dan biaya ${formatRupiah(check.value.purchaseAmount)} masuk ke Expense hari ini.`
+            : 'Stock In berhasil dicatat.'
+        );
+        setMovementModalVisible(false);
+        fetchInventory();
+      } catch (err: any) {
+        Alert.alert('Gagal Mencatat Stock In', err?.message || 'Terjadi kesalahan.');
+      } finally {
+        setSubmittingMovement(false);
+      }
       return;
     }
 
-    const current = Number(selectedItemForMovement.current_stock);
-    let after = current;
-
-    if (movementType === 'Stock In') {
-      after = current + numQty;
-    } else if (movementType === 'Stock Out') {
-      if (current < numQty) {
-        setMovementError(`Stok tidak mencukupi. Stok saat ini: ${current} ${selectedItemForMovement.unit}`);
-        return;
-      }
-      after = current - numQty;
-      if (!movementNotes.trim()) {
-        setMovementError('Keterangan wajib diisi untuk Stock Out (misal: Pemakaian harian, Rusak, dll)');
-        return;
-      }
-    } else if (movementType === 'Stock Adjustment') {
-      // Stock opname: quantity adalah nilai stok akhir aktual
-      after = numQty;
-      if (!movementNotes.trim()) {
-        setMovementError('Keterangan wajib diisi untuk Penyesuaian / Stock Opname');
-        return;
-      }
+    // Stock Out & Opname: dihitung dan dicatat di database (baris bahan terkunci).
+    const check = buildStockMovementParams({
+      inventoryId: selectedItemForMovement.id,
+      type: movementType,
+      quantityText: quantity,
+      notes: movementNotes,
+      currentStock: Number(selectedItemForMovement.current_stock),
+    });
+    if (!check.isValid || !check.params) {
+      setMovementError(check.errors.quantity || check.errors.notes || 'Data perubahan stok belum valid');
+      return;
     }
 
     setSubmittingMovement(true);
     try {
-      // 1. Insert Movement record with Snapshot data
-      const { error: moveErr } = await supabase
-        .from('stock_movements')
-        .insert({
-          inventory_id: selectedItemForMovement.id,
-          item_name: selectedItemForMovement.name,
-          item_unit: selectedItemForMovement.unit,
-          movement_type: movementType,
-          quantity: numQty,
-          stock_before: current,
-          stock_after: after,
-          notes: movementNotes.trim() || null,
-          user_id: user?.id || null,
-          user_name: user?.email || 'Staf Admin',
-        });
+      const { error: rpcErr } = await supabase.rpc('record_stock_movement', check.params);
+      if (rpcErr) throw rpcErr;
 
-      if (moveErr) throw moveErr;
-
-      // 2. Direct fallback update if trigger not run
-      await supabase
-        .from('inventory_items')
-        .update({
-          current_stock: after,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', selectedItemForMovement.id);
-
-      Alert.alert('Sukses', `Perubahan stok ${movementType} berhasil dicatat.`);
+      Alert.alert(
+        'Sukses',
+        movementType === 'Stock Out' ? 'Stock Out berhasil dicatat.' : 'Hasil stock opname berhasil dicatat.'
+      );
       setMovementModalVisible(false);
       fetchInventory();
     } catch (err: any) {
@@ -299,6 +310,35 @@ export default function AdminInventoryScreen() {
     );
   };
 
+  // Aktif/Nonaktif (Admin only): bahan nonaktif disembunyikan dari kasir dan tidak bisa dimutasi
+  const handleToggleActive = (it: InventoryItem) => {
+    const nextActive = !it.is_active;
+    Alert.alert(
+      nextActive ? 'Aktifkan Bahan Baku' : 'Nonaktifkan Bahan Baku',
+      nextActive
+        ? `Aktifkan kembali "${it.name}"? Bahan akan muncul lagi di layar kasir dan stoknya dapat dicatat.`
+        : `Nonaktifkan "${it.name}"? Bahan disembunyikan dari kasir dan stoknya tidak dapat dicatat sampai diaktifkan kembali. Riwayat tetap tersimpan.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: nextActive ? 'Aktifkan' : 'Nonaktifkan',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('inventory_items')
+                .update({ is_active: nextActive, updated_at: new Date().toISOString() })
+                .eq('id', it.id);
+              if (error) throw error;
+              fetchInventory();
+            } catch (err: any) {
+              Alert.alert('Gagal Mengubah Status', err?.message || 'Terjadi kesalahan.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const filteredItems = items.filter((it) => {
     const status = computeStockStatus(Number(it.current_stock), Number(it.min_stock));
     if (statusFilter !== 'Semua' && status.label !== statusFilter) return false;
@@ -317,9 +357,11 @@ export default function AdminInventoryScreen() {
     const min = Number(item.min_stock);
     const st = computeStockStatus(cur, min);
 
+    const inactive = item.is_active === false;
+
     return (
       <View
-        className="bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm"
+        className={`bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm ${inactive ? 'opacity-60' : ''}`}
         style={columns > 1 ? { flex: 1 } : undefined}
       >
         <View className="flex-row items-start justify-between mb-2">
@@ -332,7 +374,7 @@ export default function AdminInventoryScreen() {
             </Text>
           </View>
 
-          <Badge label={st.label} tone={st.tone} />
+          {inactive ? <Badge label="Nonaktif" tone="neutral" /> : <Badge label={st.label} tone={st.tone} />}
         </View>
 
         {/* Stock Numbers Indicator */}
@@ -344,6 +386,7 @@ export default function AdminInventoryScreen() {
             </Text>
           </View>
 
+          {!inactive && (
           <View className="flex-row gap-2">
             <TouchableOpacity
               onPress={() => openMovementModal(item, 'Stock In')}
@@ -361,6 +404,7 @@ export default function AdminInventoryScreen() {
               <Text className="font-heading-semibold text-danger text-xs ml-1">Keluar</Text>
             </TouchableOpacity>
           </View>
+          )}
         </View>
 
         {/* Footer Actions */}
@@ -373,26 +417,40 @@ export default function AdminInventoryScreen() {
             <Text className="font-heading-semibold text-primary text-xs ml-1">Riwayat Stok</Text>
           </TouchableOpacity>
 
-          <View className="flex-row gap-2">
-            <TouchableOpacity
-              onPress={() => openMovementModal(item, 'Stock Adjustment')}
-              className="px-2.5 py-1.5 rounded-button bg-background border border-line flex-row items-center"
-            >
-              <Ionicons name="swap-vertical-outline" size={14} color="#1F2937" />
-              <Text className="font-body-medium text-text text-xs ml-1">Opname</Text>
-            </TouchableOpacity>
+          <View className="flex-1 ml-2 flex-row flex-wrap justify-end gap-2">
+            {!inactive && (
+              <TouchableOpacity
+                onPress={() => openMovementModal(item, 'Stock Adjustment')}
+                className="min-h-11 px-2.5 py-1.5 rounded-button bg-background border border-line flex-row items-center"
+              >
+                <Ionicons name="swap-vertical-outline" size={14} color="#1F2937" />
+                <Text className="font-body-medium text-text text-xs ml-1">Opname</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               onPress={() => openEditItemModal(item)}
-              className="px-2.5 py-1.5 rounded-button bg-background border border-line flex-row items-center"
+              className="min-h-11 px-2.5 py-1.5 rounded-button bg-background border border-line flex-row items-center"
             >
               <Ionicons name="create-outline" size={14} color="#1F2937" />
               <Text className="font-body-medium text-text text-xs ml-1">Edit</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${inactive ? 'Aktifkan' : 'Nonaktifkan'} ${item.name}`}
+              onPress={() => handleToggleActive(item)}
+              className="min-h-11 px-2.5 py-1.5 rounded-button bg-background border border-line flex-row items-center"
+            >
+              <Ionicons name={inactive ? 'eye-outline' : 'eye-off-outline'} size={14} color="#1F2937" />
+              <Text className="font-body-medium text-text text-xs ml-1">{inactive ? 'Aktifkan' : 'Nonaktifkan'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Hapus permanen ${item.name}`}
               onPress={() => handleDeleteItem(item)}
-              className="p-1.5 rounded-button bg-danger-soft border border-line items-center justify-center"
+              className="min-h-11 min-w-11 rounded-button bg-danger-soft border border-line items-center justify-center"
             >
               <Ionicons name="trash-outline" size={14} color="#991B1B" />
             </TouchableOpacity>
@@ -706,6 +764,25 @@ export default function AdminInventoryScreen() {
                   numberOfLines={2}
                   style={{ height: 60, textAlignVertical: 'top' }}
                 />
+
+                {movementType === 'Stock In' && selectedItemForMovement && (
+                  <StockInPurchaseFields
+                    isPurchase={isPurchase}
+                    onTogglePurchase={(next) => {
+                      setIsPurchase(next);
+                      setPurchaseAmountError('');
+                    }}
+                    amountText={purchaseAmountText}
+                    onChangeAmount={(t) => {
+                      setPurchaseAmountText(t);
+                      if (purchaseAmountError) setPurchaseAmountError('');
+                    }}
+                    amountError={purchaseAmountError}
+                    itemName={selectedItemForMovement.name}
+                    unit={selectedItemForMovement.unit}
+                    quantityText={quantity}
+                  />
+                )}
 
                 <View className="flex-row gap-3 mt-2 mb-2">
                   <Button

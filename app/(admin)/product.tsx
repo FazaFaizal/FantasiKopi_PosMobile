@@ -522,8 +522,10 @@ export default function AdminProductScreen() {
               <TouchableOpacity
                 key={st}
                 accessibilityRole="button"
+                accessibilityLabel={`Filter produk: ${displayLabel}`}
+                accessibilityState={{ selected: active }}
                 onPress={() => setStatusFilter(st)}
-                className={`flex-1 py-1.5 rounded-chip items-center justify-center ${
+                className={`flex-1 min-h-11 py-1.5 rounded-chip items-center justify-center ${
                   active ? "bg-primary shadow-xs" : "bg-transparent"
                 }`}
               >

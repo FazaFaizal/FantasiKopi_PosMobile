@@ -15,23 +15,28 @@ import { useAdminSidebar } from "../../components/SidebarDrawer";
 import { LoadingState } from "../../components/States";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
+import { formatRupiah } from "../../lib/formatters";
+import {
+  calculateTodayDashboardMetrics,
+  getRecentOrders,
+  TodayDashboardMetrics,
+  DashboardOrder,
+} from "../../lib/dashboard-logic";
+import { getBusinessDateString, getBusinessDayRangeISO } from "../../lib/timezone";
+import { getOrderStatusBadgeTone } from "../../lib/order-logic";
 
-interface DashboardStats {
+interface MasterDataStats {
   totalEmployees: number;
   activeEmployees: number;
   totalUsers: number;
   adminUsers: number;
   kasirUsers: number;
   customerUsers: number;
-  // Iterasi 2 Stats
   totalProducts: number;
   availableProducts: number;
   unavailableProducts: number;
   totalCategories: number;
   totalInventoryItems: number;
-  safeStockCount: number;
-  lowStockCount: number;
-  outOfStockCount: number;
 }
 
 export default function AdminDashboard() {
@@ -40,7 +45,7 @@ export default function AdminDashboard() {
   const { openSidebar } = useAdminSidebar();
   const { isTablet, isLandscape } = useResponsive();
 
-  const [stats, setStats] = useState<DashboardStats>({
+  const [masterStats, setMasterStats] = useState<MasterDataStats>({
     totalEmployees: 0,
     activeEmployees: 0,
     totalUsers: 0,
@@ -52,14 +57,27 @@ export default function AdminDashboard() {
     unavailableProducts: 0,
     totalCategories: 0,
     totalInventoryItems: 0,
+  });
+
+  const [todayMetrics, setTodayMetrics] = useState<TodayDashboardMetrics>({
+    todayOrderCount: 0,
+    todayPaidOrderCount: 0,
+    todayInProgressCount: 0,
+    todayAwaitingPaymentCount: 0,
+    todaySales: 0,
+    todayExpenses: 0,
+    todayNetResult: 0,
+    topProductToday: null,
     safeStockCount: 0,
     lowStockCount: 0,
     outOfStockCount: 0,
   });
+
+  const [recentOrders, setRecentOrders] = useState<DashboardOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchStats = useCallback(async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       // 1. Employees
       const { data: employees } = await supabase
@@ -94,25 +112,47 @@ export default function AdminDashboard() {
         (p) => p.status === "Tidak Tersedia",
       ).length;
 
-      // 5. Inventory Items (not deleted)
+      // 5. Inventory Items (hanya bahan aktif)
       const { data: inventory } = await supabase
         .from("inventory_items")
-        .select("id, is_deleted, current_stock, min_stock");
-      const invList = (inventory || []).filter((i) => !i.is_deleted);
-      let safe = 0;
-      let low = 0;
-      let out = 0;
-      invList.forEach((item) => {
-        if (Number(item.current_stock) <= 0) {
-          out += 1;
-        } else if (Number(item.current_stock) <= Number(item.min_stock)) {
-          low += 1;
-        } else {
-          safe += 1;
-        }
-      });
+        .select("id, name, is_active, current_stock, min_stock")
+        .eq("is_active", true);
+      const invList = inventory || [];
 
-      setStats({
+      // 6. Orders hari ini saja (zona waktu bisnis) + 5 order terbaru untuk widget
+      const today = getBusinessDateString();
+      const { startISO, endISO } = getBusinessDayRangeISO(today, today);
+      const orderColumns =
+        "id, order_number, order_status, payment_status, total_amount, customer_name, payment_method, created_at, items:order_items(product_name, quantity, subtotal)";
+      const [{ data: ordersData }, { data: recentData }] = await Promise.all([
+        supabase
+          .from("orders")
+          .select(orderColumns)
+          .gte("created_at", startISO)
+          .lt("created_at", endISO)
+          .order("created_at", { ascending: false }),
+        supabase.from("orders").select(orderColumns).order("created_at", { ascending: false }).limit(5),
+      ]);
+      const ordersList = (ordersData as unknown as DashboardOrder[]) || [];
+
+      // 7. Expenses hari ini
+      const { data: expensesData } = await supabase
+        .from("expenses")
+        .select("id, description, amount, category, expense_date")
+        .eq("expense_date", today);
+      const expensesList = expensesData || [];
+
+      // Calculate Metrics using Pure Logic Layer (PRD Section 27)
+      const metrics = calculateTodayDashboardMetrics(
+        ordersList,
+        expensesList,
+        invList,
+        new Date(),
+      );
+
+      const latestOrders = getRecentOrders((recentData as unknown as DashboardOrder[]) || [], 5);
+
+      setMasterStats({
         totalEmployees: empList.length,
         activeEmployees: activeEmp,
         totalUsers: userList.length,
@@ -124,12 +164,12 @@ export default function AdminDashboard() {
         unavailableProducts: unavailCount,
         totalCategories: activeCats,
         totalInventoryItems: invList.length,
-        safeStockCount: safe,
-        lowStockCount: low,
-        outOfStockCount: out,
       });
+
+      setTodayMetrics(metrics);
+      setRecentOrders(latestOrders);
     } catch (err: any) {
-      console.error("Error fetching dashboard stats:", err);
+      console.error("Error fetching dashboard data:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -137,12 +177,24 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchStats();
+    fetchDashboardData();
+  };
+
+  const formatOrderTime = (isoString: string) => {
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "-";
+    }
   };
 
   return (
@@ -197,9 +249,12 @@ export default function AdminDashboard() {
           </View>
         </View>
 
-        {/* Stock Alert Warning Banner (if any low or out of stock items) */}
-        {(stats.lowStockCount > 0 || stats.outOfStockCount > 0) && (
+        {/* Stock Alert Warning Banner */}
+        {(todayMetrics.lowStockCount > 0 ||
+          todayMetrics.outOfStockCount > 0) && (
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Lihat bahan baku yang stoknya menipis atau habis"
             onPress={() => router.replace("/(admin)/inventory")}
             activeOpacity={0.8}
             className="bg-amber-50 rounded-card p-4 border border-amber-200 mb-5 shadow-sm"
@@ -214,10 +269,10 @@ export default function AdminDashboard() {
               <Ionicons name="chevron-forward" size={16} color="#D97706" />
             </View>
             <Text className="font-body text-amber-800 text-xs leading-4">
-              {stats.outOfStockCount > 0 &&
-                `${stats.outOfStockCount} bahan baku HABIS. `}
-              {stats.lowStockCount > 0 &&
-                `${stats.lowStockCount} bahan baku MENIPIS di bawah batas minimum.`}
+              {todayMetrics.outOfStockCount > 0 &&
+                `${todayMetrics.outOfStockCount} bahan baku HABIS. `}
+              {todayMetrics.lowStockCount > 0 &&
+                `${todayMetrics.lowStockCount} bahan baku MENIPIS di bawah batas minimum.`}
             </Text>
             <Text className="font-body-medium text-amber-900 text-xs mt-2 underline">
               Ketuk untuk buka modul inventaris dan catat stok masuk
@@ -225,7 +280,219 @@ export default function AdminDashboard() {
           </TouchableOpacity>
         )}
 
-        {/* Section: Iterasi 2 - Produk & Inventaris */}
+        {/* SECTION 1: METRIK HARI INI (PRD Section 27 - Live Sales & Financial) */}
+        <View className="flex-row items-center justify-between mb-3">
+          <View className="flex-row items-center">
+            <Ionicons name="flash-outline" size={20} color="#D1001F" />
+            <Text className="font-heading-semibold text-text text-lg ml-2">
+              Kondisi Operasional Hari Ini
+            </Text>
+          </View>
+          <Badge label="Data Aktual" tone="success" />
+        </View>
+
+        {loading ? (
+          <View className="bg-surface rounded-card p-6 border border-line mb-6">
+            <LoadingState label="Memuat ringkasan live..." />
+          </View>
+        ) : (
+          <View
+            className={
+              isTablet ? "flex-row flex-wrap justify-between mb-6" : "mb-6"
+            }
+          >
+            {/* Card 1: Omzet Hari Ini */}
+            <View
+              className="bg-surface rounded-card p-4 border border-line shadow-sm mb-3.5"
+              style={
+                isTablet
+                  ? { width: isLandscape ? "23.5%" : "48.5%" }
+                  : undefined
+              }
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="font-body-medium text-muted text-xs">
+                  Omzet Penjualan
+                </Text>
+                <View className="w-8 h-8 rounded-full bg-emerald-50 items-center justify-center">
+                  <Ionicons name="cash-outline" size={16} color="#047857" />
+                </View>
+              </View>
+              <Text className="font-heading-bold text-text text-xl">
+                {formatRupiah(todayMetrics.todaySales)}
+              </Text>
+              <Text className="font-body text-success text-[11px] mt-1">
+                {todayMetrics.todayPaidOrderCount} order lunas
+              </Text>
+              {todayMetrics.todayAwaitingPaymentCount > 0 && (
+                <Text className="font-body text-amber-700 text-[11px] mt-0.5">
+                  {todayMetrics.todayAwaitingPaymentCount} menunggu pembayaran
+                </Text>
+              )}
+            </View>
+
+            {/* Card 2: Jumlah Order Hari Ini */}
+            <View
+              className="bg-surface rounded-card p-4 border border-line shadow-sm mb-3.5"
+              style={
+                isTablet
+                  ? { width: isLandscape ? "23.5%" : "48.5%" }
+                  : undefined
+              }
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="font-body-medium text-muted text-xs">
+                  Pesanan Masuk
+                </Text>
+                <View className="w-8 h-8 rounded-full bg-primary/10 items-center justify-center">
+                  <Ionicons name="receipt-outline" size={16} color="#D1001F" />
+                </View>
+              </View>
+              <Text className="font-heading-bold text-text text-xl">
+                {todayMetrics.todayOrderCount}
+              </Text>
+              <Text className="font-body text-muted text-[11px] mt-1">
+                Total semua pesanan hari ini
+              </Text>
+            </View>
+
+            {/* Card 3: Produk Terlaris Hari Ini */}
+            <View
+              className="bg-surface rounded-card p-4 border border-line shadow-sm mb-3.5"
+              style={
+                isTablet
+                  ? { width: isLandscape ? "23.5%" : "48.5%" }
+                  : undefined
+              }
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="font-body-medium text-muted text-xs">
+                  Produk Terlaris
+                </Text>
+                <View className="w-8 h-8 rounded-full bg-amber-50 items-center justify-center">
+                  <Ionicons name="trophy-outline" size={16} color="#B45309" />
+                </View>
+              </View>
+              <Text
+                className="font-heading-bold text-text text-base"
+                numberOfLines={1}
+              >
+                {todayMetrics.topProductToday?.name || "-"}
+              </Text>
+              <Text className="font-body text-amber-700 text-[11px] mt-1">
+                {todayMetrics.topProductToday
+                  ? `${todayMetrics.topProductToday.quantity} cup terjual`
+                  : "Belum ada pesanan lunas"}
+              </Text>
+            </View>
+
+            {/* Card 4: Net Result Hari Ini */}
+            <View
+              className="bg-surface rounded-card p-4 border border-line shadow-sm mb-3.5"
+              style={
+                isTablet
+                  ? { width: isLandscape ? "23.5%" : "48.5%" }
+                  : undefined
+              }
+            >
+              <View className="flex-row items-center justify-between mb-2">
+                <Text className="font-body-medium text-muted text-xs">
+                  Laba Bersih (Net)
+                </Text>
+                <View
+                  className={`w-8 h-8 rounded-full items-center justify-center ${
+                    todayMetrics.todayNetResult >= 0
+                      ? "bg-emerald-50"
+                      : "bg-red-50"
+                  }`}
+                >
+                  <Ionicons
+                    name={
+                      todayMetrics.todayNetResult >= 0
+                        ? "trending-up"
+                        : "trending-down"
+                    }
+                    size={16}
+                    color={
+                      todayMetrics.todayNetResult >= 0 ? "#047857" : "#DC2626"
+                    }
+                  />
+                </View>
+              </View>
+              <Text
+                className={`font-heading-bold text-xl ${
+                  todayMetrics.todayNetResult >= 0
+                    ? "text-emerald-700"
+                    : "text-danger"
+                }`}
+              >
+                {formatRupiah(todayMetrics.todayNetResult)}
+              </Text>
+              <Text className="font-body text-muted text-[11px] mt-1">
+                Biaya: {formatRupiah(todayMetrics.todayExpenses)}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* SECTION 2: 5 RECENT ORDERS (PRD Section 27) */}
+        <View className="flex-row items-center justify-between mb-3">
+          <View className="flex-row items-center">
+            <Ionicons name="time-outline" size={18} color="#1F2937" />
+            <Text className="font-heading-semibold text-text text-lg ml-2">
+              Pesanan Terbaru
+            </Text>
+          </View>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Buka laporan lengkap"
+            onPress={() => router.replace("/(admin)/report")}
+            className="flex-row items-center min-h-11"
+          >
+            <Text className="text-primary font-heading-semibold text-xs mr-1">
+              Semua Transaksi
+            </Text>
+            <Ionicons name="arrow-forward" size={12} color="#D1001F" />
+          </TouchableOpacity>
+        </View>
+
+        <View className="bg-surface rounded-card border border-line p-3 mb-6 shadow-sm divide-y divide-line">
+          {recentOrders.length === 0 ? (
+            <Text className="text-muted text-xs text-center py-4 italic">
+              Belum ada riwayat pesanan tercatat di sistem.
+            </Text>
+          ) : (
+            recentOrders.map((ord) => (
+              <View
+                key={ord.id}
+                className="py-2.5 flex-row justify-between items-center"
+              >
+                <View className="flex-1 mr-2">
+                  <View className="flex-row items-center">
+                    <Text className="font-heading-bold text-text text-xs mr-2">
+                      {ord.order_number}
+                    </Text>
+                    <Badge
+                      label={ord.order_status}
+                      tone={getOrderStatusBadgeTone(ord.order_status)}
+                    />
+                  </View>
+                  <Text className="font-body text-muted text-[11px] mt-0.5">
+                    {ord.customer_name || "Pelanggan"} •{" "}
+                    {formatOrderTime(ord.created_at)} •{" "}
+                    {ord.payment_method || "QRIS"}
+                  </Text>
+                </View>
+
+                <Text className="font-heading-bold text-primary text-sm">
+                  {formatRupiah(ord.total_amount)}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        {/* SECTION 3: MODUL OPERASIONAL KEDAI */}
         <Text className="font-heading-semibold text-text text-lg mb-3">
           Produk & Inventaris
         </Text>
@@ -234,10 +501,13 @@ export default function AdminDashboard() {
           {/* Card 1: Product Management */}
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Buka menu produk"
             onPress={() => router.replace("/(admin)/product")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-3.5"
-            style={isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined}
+            style={
+              isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined
+            }
           >
             <View className="flex-row items-start mb-2">
               <View className="w-12 h-12 rounded-card bg-primary/10 items-center justify-center mr-3.5 border border-primary/20">
@@ -252,7 +522,10 @@ export default function AdminDashboard() {
                   status ketersediaan.
                 </Text>
               </View>
-              <Badge label={`${stats.totalProducts} Item`} tone="neutral" />
+              <Badge
+                label={`${masterStats.totalProducts} Item`}
+                tone="neutral"
+              />
             </View>
 
             <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
@@ -260,11 +533,11 @@ export default function AdminDashboard() {
                 <Text className="font-body text-muted text-xs">
                   Tersedia:{" "}
                   <Text className="font-heading-semibold text-success">
-                    {stats.availableProducts}
+                    {masterStats.availableProducts}
                   </Text>{" "}
                   | Tidak Tersedia:{" "}
                   <Text className="font-heading-semibold text-danger">
-                    {stats.unavailableProducts}
+                    {masterStats.unavailableProducts}
                   </Text>
                 </Text>
               </View>
@@ -280,10 +553,13 @@ export default function AdminDashboard() {
           {/* Card 2: Category Management */}
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Buka kategori menu"
             onPress={() => router.replace("/(admin)/category")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-3.5"
-            style={isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined}
+            style={
+              isTablet ? { width: isLandscape ? "31.8%" : "48.5%" } : undefined
+            }
           >
             <View className="flex-row items-start mb-2">
               <View className="w-12 h-12 rounded-card bg-amber-500/10 items-center justify-center mr-3.5 border border-amber-500/20">
@@ -298,12 +574,15 @@ export default function AdminDashboard() {
                   Artisanal, dll).
                 </Text>
               </View>
-              <Badge label={`${stats.totalCategories} Kategori`} tone="warning" />
+              <Badge
+                label={`${masterStats.totalCategories} Kategori`}
+                tone="warning"
+              />
             </View>
 
             <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
               <Text className="font-body text-muted text-xs">
-                Mencegah penghapusan jika kategori memiliki produk terhubung
+                Mencegah penghapusan kategori
               </Text>
               <View className="flex-row items-center">
                 <Text className="font-heading-semibold text-primary text-xs mr-1">
@@ -317,10 +596,13 @@ export default function AdminDashboard() {
           {/* Card 3: Raw Material Inventory & Movements */}
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Buka bahan baku"
             onPress={() => router.replace("/(admin)/inventory")}
             activeOpacity={0.8}
             className="bg-surface rounded-card p-5 border border-line shadow-sm mb-6"
-            style={isTablet ? { width: isLandscape ? "31.8%" : "100%" } : undefined}
+            style={
+              isTablet ? { width: isLandscape ? "31.8%" : "100%" } : undefined
+            }
           >
             <View className="flex-row items-start mb-2">
               <View className="w-12 h-12 rounded-card bg-emerald-500/10 items-center justify-center mr-3.5 border border-emerald-500/20">
@@ -331,12 +613,12 @@ export default function AdminDashboard() {
                   Inventaris Bahan Baku
                 </Text>
                 <Text className="font-body text-muted text-xs mt-0.5 leading-4">
-                  Pencatatan stok fisik, batas minimum, mutasi stok masuk/keluar,
-                  dan penyesuaian opname.
+                  Pencatatan stok fisik, batas minimum, mutasi stok
+                  masuk/keluar, dan penyesuaian opname.
                 </Text>
               </View>
               <Badge
-                label={`${stats.totalInventoryItems} Bahan`}
+                label={`${masterStats.totalInventoryItems} Bahan`}
                 tone="success"
               />
             </View>
@@ -346,15 +628,15 @@ export default function AdminDashboard() {
                 <Text className="font-body text-muted text-xs">
                   Aman:{" "}
                   <Text className="font-heading-semibold text-success">
-                    {stats.safeStockCount}
+                    {todayMetrics.safeStockCount}
                   </Text>{" "}
                   | Menipis:{" "}
                   <Text className="font-heading-semibold text-warning">
-                    {stats.lowStockCount}
+                    {todayMetrics.lowStockCount}
                   </Text>{" "}
                   | Habis:{" "}
                   <Text className="font-heading-semibold text-danger">
-                    {stats.outOfStockCount}
+                    {todayMetrics.outOfStockCount}
                   </Text>
                 </Text>
               </View>
@@ -368,7 +650,94 @@ export default function AdminDashboard() {
           </TouchableOpacity>
         </View>
 
-        {/* Section: Operasional Staf & Akun (Iterasi 1) */}
+        {/* SECTION 4: KEUANGAN & LAPORAN */}
+        <Text className="font-heading-semibold text-text text-lg mb-3">
+          Keuangan & Laporan
+        </Text>
+
+        <View className={isTablet ? "flex-row justify-between mb-6" : ""}>
+          {/* Menu: Expense Management */}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Buka biaya operasional"
+            onPress={() => router.replace("/(admin)/expense")}
+            activeOpacity={0.8}
+            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? "mb-0" : "mb-3.5"}`}
+            style={isTablet ? { width: "48.5%" } : undefined}
+          >
+            <View className="flex-row items-start mb-2">
+              <View className="w-12 h-12 rounded-card bg-primary/10 items-center justify-center mr-3.5 border border-primary/20">
+                <Ionicons name="wallet-outline" size={24} color="#D1001F" />
+              </View>
+              <View className="flex-1 mr-2">
+                <Text className="font-heading-semibold text-text text-base">
+                  Biaya Operasional
+                </Text>
+                <Text className="font-body text-muted text-xs mt-0.5 leading-4">
+                  Pencatatan pengeluaran bahan baku, utilitas kedai, dan aset
+                  peralatan.
+                </Text>
+              </View>
+              <Badge label="Pengeluaran" tone="accent" />
+            </View>
+
+            <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
+              <Text className="font-body text-muted text-xs">
+                Kategori: Raw Material, Utilitas, Alat
+              </Text>
+              <View className="flex-row items-center">
+                <Text className="font-heading-semibold text-primary text-xs mr-1">
+                  Buka
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#D1001F" />
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          {/* Menu: Sales & Financial Report */}
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Buka laporan dan finansial"
+            onPress={() => router.replace("/(admin)/report")}
+            activeOpacity={0.8}
+            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? "mb-0" : "mb-6"}`}
+            style={isTablet ? { width: "48.5%" } : undefined}
+          >
+            <View className="flex-row items-start mb-2">
+              <View className="w-12 h-12 rounded-card bg-emerald-500/10 items-center justify-center mr-3.5 border border-emerald-500/20">
+                <Ionicons
+                  name="trending-up-outline"
+                  size={24}
+                  color="#047857"
+                />
+              </View>
+              <View className="flex-1 mr-2">
+                <Text className="font-heading-semibold text-text text-base">
+                  Laporan & Finansial
+                </Text>
+                <Text className="font-body text-muted text-xs mt-0.5 leading-4">
+                  Analisis omzet penjualan, top menu terlaris, dan kalkulasi
+                  laba bersih.
+                </Text>
+              </View>
+              <Badge label="Laba Bersih" tone="success" />
+            </View>
+
+            <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
+              <Text className="font-body text-muted text-xs">
+                Net Result = Penjualan - Biaya
+              </Text>
+              <View className="flex-row items-center">
+                <Text className="font-heading-semibold text-primary text-xs mr-1">
+                  Buka
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#D1001F" />
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* SECTION 5: PENGGUNA & KARYAWAN */}
         <Text className="font-heading-semibold text-text text-lg mb-3">
           Pengguna & Karyawan
         </Text>
@@ -377,9 +746,10 @@ export default function AdminDashboard() {
           {/* Menu: Employee Management */}
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityLabel="Buka data karyawan"
             onPress={() => router.replace("/(admin)/employee")}
             activeOpacity={0.8}
-            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? 'mb-0' : 'mb-3.5'}`}
+            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? "mb-0" : "mb-3.5"}`}
             style={isTablet ? { width: "48.5%" } : undefined}
           >
             <View className="flex-row items-start mb-2">
@@ -395,14 +765,17 @@ export default function AdminDashboard() {
                   aktif.
                 </Text>
               </View>
-              <Badge label={`${stats.totalEmployees} Staf`} tone="neutral" />
+              <Badge
+                label={`${masterStats.totalEmployees} Staf`}
+                tone="neutral"
+              />
             </View>
 
             <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
               <Text className="font-body text-muted text-xs">
                 Aktif:{" "}
                 <Text className="font-heading-semibold text-success">
-                  {stats.activeEmployees}
+                  {masterStats.activeEmployees}
                 </Text>{" "}
                 staf bekerja
               </Text>
@@ -420,7 +793,7 @@ export default function AdminDashboard() {
             accessibilityRole="button"
             onPress={() => router.replace("/(admin)/user")}
             activeOpacity={0.8}
-            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? 'mb-0' : 'mb-6'}`}
+            className={`bg-surface rounded-card p-5 border border-line shadow-sm ${isTablet ? "mb-0" : "mb-6"}`}
             style={isTablet ? { width: "48.5%" } : undefined}
           >
             <View className="flex-row items-start mb-2">
@@ -436,12 +809,13 @@ export default function AdminDashboard() {
                   kontrol akses.
                 </Text>
               </View>
-              <Badge label={`${stats.totalUsers} Akun`} tone="neutral" />
+              <Badge label={`${masterStats.totalUsers} Akun`} tone="neutral" />
             </View>
 
             <View className="mt-3 pt-3 border-t border-line flex-row justify-between items-center">
               <Text className="font-body text-muted text-xs">
-                Kasir: {stats.kasirUsers} | Customer: {stats.customerUsers}
+                Kasir: {masterStats.kasirUsers} | Customer:{" "}
+                {masterStats.customerUsers}
               </Text>
               <View className="flex-row items-center">
                 <Text className="font-heading-semibold text-primary text-xs mr-1">
@@ -451,145 +825,6 @@ export default function AdminDashboard() {
               </View>
             </View>
           </TouchableOpacity>
-        </View>
-
-        {/* Real-time Metric Overview Card */}
-        <View className="bg-surface rounded-card p-5 border border-line shadow-sm">
-          <View className="flex-row items-center mb-3">
-            <Ionicons name="stats-chart-outline" size={18} color="#1F2937" />
-            <Text className="font-heading-semibold text-text text-base ml-2">
-              Ringkasan Operasional
-            </Text>
-          </View>
-
-          {loading ? (
-            <LoadingState label="Mengambil ringkasan..." />
-          ) : (
-            <View className={isTablet ? "flex-row gap-3" : "gap-3"}>
-              {isTablet ? (
-                <>
-                  <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                    <Text className="font-body text-muted text-xs">
-                      Produk Menu
-                    </Text>
-                    <Text className="font-heading text-primary text-2xl mt-1">
-                      {stats.totalProducts}
-                    </Text>
-                    <Text className="font-body text-success text-xs mt-1">
-                      {stats.availableProducts} tersedia
-                    </Text>
-                  </View>
-
-                  <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                    <Text className="font-body text-muted text-xs">
-                      Bahan Baku
-                    </Text>
-                    <Text className="font-heading text-text text-2xl mt-1">
-                      {stats.totalInventoryItems}
-                    </Text>
-                    <Text className="font-body text-muted text-xs mt-1">
-                      {stats.lowStockCount + stats.outOfStockCount > 0 ? (
-                        <Text className="text-warning font-body-medium">
-                          {stats.lowStockCount + stats.outOfStockCount} perlu restock
-                        </Text>
-                      ) : (
-                        <Text className="text-success font-body-medium">
-                          Semua stok aman
-                        </Text>
-                      )}
-                    </Text>
-                  </View>
-
-                  <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                    <Text className="font-body text-muted text-xs">
-                      Total Staf
-                    </Text>
-                    <Text className="font-heading text-primary text-2xl mt-1">
-                      {stats.totalEmployees}
-                    </Text>
-                    <Text className="font-body text-success text-xs mt-0.5">
-                      {stats.activeEmployees} aktif
-                    </Text>
-                  </View>
-
-                  <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                    <Text className="font-body text-muted text-xs">
-                      Total Akun
-                    </Text>
-                    <Text className="font-heading text-text text-2xl mt-1">
-                      {stats.totalUsers}
-                    </Text>
-                    <Text className="font-body text-muted text-xs mt-0.5">
-                      {stats.kasirUsers} kasir
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <View className="flex-row gap-3">
-                    <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                      <Text className="font-body text-muted text-xs">
-                        Produk Menu
-                      </Text>
-                      <Text className="font-heading text-primary text-2xl mt-1">
-                        {stats.totalProducts}
-                      </Text>
-                      <Text className="font-body text-success text-xs mt-1">
-                        {stats.availableProducts} tersedia
-                      </Text>
-                    </View>
-
-                    <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                      <Text className="font-body text-muted text-xs">
-                        Bahan Baku
-                      </Text>
-                      <Text className="font-heading text-text text-2xl mt-1">
-                        {stats.totalInventoryItems}
-                      </Text>
-                      <Text className="font-body text-muted text-xs mt-1">
-                        {stats.lowStockCount + stats.outOfStockCount > 0 ? (
-                          <Text className="text-warning font-body-medium">
-                            {stats.lowStockCount + stats.outOfStockCount} perlu
-                            restock
-                          </Text>
-                        ) : (
-                          <Text className="text-success font-body-medium">
-                            Semua stok aman
-                          </Text>
-                        )}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View className="flex-row gap-3">
-                    <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                      <Text className="font-body text-muted text-xs">
-                        Total Staf
-                      </Text>
-                      <Text className="font-heading text-primary text-xl mt-1">
-                        {stats.totalEmployees}
-                      </Text>
-                      <Text className="font-body text-success text-xs mt-0.5">
-                        {stats.activeEmployees} aktif
-                      </Text>
-                    </View>
-
-                    <View className="flex-1 bg-background rounded-chip p-3.5 border border-line">
-                      <Text className="font-body text-muted text-xs">
-                        Total Akun
-                      </Text>
-                      <Text className="font-heading text-text text-xl mt-1">
-                        {stats.totalUsers}
-                      </Text>
-                      <Text className="font-body text-muted text-xs mt-0.5">
-                        {stats.kasirUsers} kasir
-                      </Text>
-                    </View>
-                  </View>
-                </>
-              )}
-            </View>
-          )}
         </View>
       </ScrollView>
     </View>

@@ -21,16 +21,21 @@ import { ChoiceGroup } from '../../components/ChoiceGroup';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { useKasirSidebar } from '../../components/SidebarDrawer';
-import { useAuth } from '../../lib/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import { computeStockStatus } from '../../lib/inventory-logic';
+import {
+  computeStockStatus,
+  validateStockInPurchase,
+  buildRecordStockInParams,
+  buildStockMovementParams,
+} from '../../lib/inventory-logic';
+import { formatRupiah } from '../../lib/formatters';
+import { StockInPurchaseFields } from '../../components/StockInPurchaseFields';
 import { useResponsive } from '../../hooks/useResponsive';
 
 type InventoryItem = Database['public']['Tables']['inventory_items']['Row'];
 type StockMovement = Database['public']['Tables']['stock_movements']['Row'];
 
 export default function KasirInventoryScreen() {
-  const { user } = useAuth();
   const { openSidebar } = useKasirSidebar();
   const { isTablet, columns } = useResponsive();
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -56,6 +61,10 @@ export default function KasirInventoryScreen() {
   const [quantity, setQuantity] = useState('');
   const [movementNotes, setMovementNotes] = useState('');
   const [movementError, setMovementError] = useState('');
+  // Stock In sebagai pembelian (#4)
+  const [isPurchase, setIsPurchase] = useState(false);
+  const [purchaseAmountText, setPurchaseAmountText] = useState('');
+  const [purchaseAmountError, setPurchaseAmountError] = useState('');
   const [submittingMovement, setSubmittingMovement] = useState(false);
 
   // Modal 3: Riwayat Pergerakan Stok
@@ -71,7 +80,7 @@ export default function KasirInventoryScreen() {
       const { data, error } = await supabase
         .from('inventory_items')
         .select('*')
-        .eq('is_deleted', false)
+        .eq('is_active', true)
         .order('name', { ascending: true });
 
       if (error) throw error;
@@ -146,7 +155,6 @@ export default function KasirInventoryScreen() {
             current_stock: 0,
             min_stock: numMin,
             notes: notes.trim() || null,
-            is_deleted: false,
           });
 
         if (error) throw error;
@@ -168,74 +176,80 @@ export default function KasirInventoryScreen() {
     setQuantity('');
     setMovementNotes('');
     setMovementError('');
+    setIsPurchase(false);
+    setPurchaseAmountText('');
+    setPurchaseAmountError('');
     setMovementModalVisible(true);
   };
 
   const handleSaveMovement = async () => {
     if (!selectedItemForMovement) return;
     setMovementError('');
+    setPurchaseAmountError('');
 
-    const numQty = Number(quantity);
-    if (!quantity || isNaN(numQty) || numQty <= 0) {
-      setMovementError('Jumlah perubahan harus lebih besar dari 0');
+    // Stock In: mutasi stok + biaya pembelian (opsional) disimpan atomik di database.
+    if (movementType === 'Stock In') {
+      const check = validateStockInPurchase({
+        quantityText: quantity,
+        isPurchase,
+        amountText: purchaseAmountText,
+      });
+      if (!check.isValid || !check.value) {
+        setMovementError(check.errors.quantity || '');
+        setPurchaseAmountError(check.errors.amount || '');
+        return;
+      }
+
+      setSubmittingMovement(true);
+      try {
+        const { error: rpcErr } = await supabase.rpc(
+          'record_stock_in',
+          buildRecordStockInParams(selectedItemForMovement.id, check.value, movementNotes)
+        );
+        if (rpcErr) throw rpcErr;
+
+        Alert.alert(
+          'Sukses',
+          check.value.purchaseAmount
+            ? `Stock In dicatat dan biaya ${formatRupiah(check.value.purchaseAmount)} masuk ke Expense hari ini.`
+            : 'Stock In berhasil dicatat.'
+        );
+        setMovementModalVisible(false);
+        fetchInventory();
+      } catch (err: any) {
+        Alert.alert('Gagal Mencatat Stock In', err?.message || 'Terjadi kesalahan.');
+      } finally {
+        setSubmittingMovement(false);
+      }
       return;
     }
 
-    const current = Number(selectedItemForMovement.current_stock);
-    let after = current;
-
-    if (movementType === 'Stock In') {
-      after = current + numQty;
-    } else if (movementType === 'Stock Out') {
-      if (current < numQty) {
-        setMovementError(`Stok tidak mencukupi. Stok saat ini: ${current} ${selectedItemForMovement.unit}`);
-        return;
-      }
-      after = current - numQty;
-      if (!movementNotes.trim()) {
-        setMovementError('Keterangan wajib diisi untuk Stock Out (misal: Pemakaian barista, Rusak)');
-        return;
-      }
-    } else if (movementType === 'Stock Adjustment') {
-      after = numQty;
-      if (!movementNotes.trim()) {
-        setMovementError('Keterangan wajib diisi untuk Stock Opname');
-        return;
-      }
+    // Stock Out & Opname: dihitung dan dicatat di database (baris bahan terkunci).
+    const check = buildStockMovementParams({
+      inventoryId: selectedItemForMovement.id,
+      type: movementType,
+      quantityText: quantity,
+      notes: movementNotes,
+      currentStock: Number(selectedItemForMovement.current_stock),
+    });
+    if (!check.isValid || !check.params) {
+      setMovementError(check.errors.quantity || check.errors.notes || 'Data perubahan stok belum valid');
+      return;
     }
 
     setSubmittingMovement(true);
     try {
-      const { error: moveErr } = await supabase
-        .from('stock_movements')
-        .insert({
-          inventory_id: selectedItemForMovement.id,
-          item_name: selectedItemForMovement.name,
-          item_unit: selectedItemForMovement.unit,
-          movement_type: movementType,
-          quantity: numQty,
-          stock_before: current,
-          stock_after: after,
-          notes: movementNotes.trim() || null,
-          user_id: user?.id || null,
-          user_name: user?.email || 'Staf Kasir',
-        });
+      const { error: rpcErr } = await supabase.rpc('record_stock_movement', check.params);
+      if (rpcErr) throw rpcErr;
 
-      if (moveErr) throw moveErr;
-
-      await supabase
-        .from('inventory_items')
-        .update({
-          current_stock: after,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', selectedItemForMovement.id);
-
-      Alert.alert('Sukses', `Mutasi stok ${movementType} berhasil dicatat.`);
+      Alert.alert(
+        'Sukses',
+        movementType === 'Stock Out' ? 'Stock Out berhasil dicatat.' : 'Hasil stock opname berhasil dicatat.'
+      );
       setMovementModalVisible(false);
       fetchInventory();
     } catch (err: any) {
-      Alert.alert('Gagal Mencatat Mutasi', err?.message || 'Terjadi kesalahan.');
+      Alert.alert('Gagal Mencatat Perubahan Stok', err?.message || 'Terjadi kesalahan.');
     } finally {
       setSubmittingMovement(false);
     }
@@ -658,6 +672,25 @@ export default function KasirInventoryScreen() {
                   numberOfLines={2}
                   style={{ height: 60, textAlignVertical: 'top' }}
                 />
+
+                {movementType === 'Stock In' && selectedItemForMovement && (
+                  <StockInPurchaseFields
+                    isPurchase={isPurchase}
+                    onTogglePurchase={(next) => {
+                      setIsPurchase(next);
+                      setPurchaseAmountError('');
+                    }}
+                    amountText={purchaseAmountText}
+                    onChangeAmount={(t) => {
+                      setPurchaseAmountText(t);
+                      if (purchaseAmountError) setPurchaseAmountError('');
+                    }}
+                    amountError={purchaseAmountError}
+                    itemName={selectedItemForMovement.name}
+                    unit={selectedItemForMovement.unit}
+                    quantityText={quantity}
+                  />
+                )}
 
                 <View className="flex-row gap-3 mt-2 mb-2">
                   <Button

@@ -3,6 +3,7 @@ import { Text, TouchableOpacity, View, Platform, StatusBar } from "react-native"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useNetworkStatus } from "../hooks/useNetworkStatus";
 
 interface ScreenHeaderProps {
   title: string;
@@ -11,6 +12,7 @@ interface ScreenHeaderProps {
   rightAction?: React.ReactNode;
   onOpenSidebar?: () => void;
   onClose?: () => void;
+  showNetworkStatus?: boolean;
 }
 
 export function ScreenHeader({
@@ -20,9 +22,11 @@ export function ScreenHeader({
   rightAction,
   onOpenSidebar,
   onClose,
+  showNetworkStatus = true,
 }: ScreenHeaderProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { isOnline } = useNetworkStatus();
 
   // Pastikan ruang aman (safe area) dari status bar Android, notch, maupun punch-hole kamera
   const topInset = Math.max(
@@ -89,7 +93,31 @@ export function ScreenHeader({
           </View>
         </View>
 
-        {rightAction && <View className="flex-shrink-0">{rightAction}</View>}
+        {/* Right Container: Network Status + Custom Right Action */}
+        <View className="flex-row items-center gap-2 flex-shrink-0">
+          {showNetworkStatus && (
+            <View
+              className={`flex-row items-center px-2 py-0.5 rounded-full border ${
+                isOnline
+                  ? "bg-emerald-500/20 border-emerald-400/40"
+                  : "bg-red-500/20 border-red-400/40"
+              }`}
+              accessibilityRole="text"
+              accessibilityLabel={`Status jaringan: ${isOnline ? "Online" : "Offline"}`}
+            >
+              <View
+                className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                  isOnline ? "bg-emerald-400" : "bg-red-400"
+                }`}
+              />
+              <Text className="text-[10px] font-body-medium text-white">
+                {isOnline ? "Online" : "Offline"}
+              </Text>
+            </View>
+          )}
+
+          {rightAction && <View className="flex-shrink-0">{rightAction}</View>}
+        </View>
       </View>
     </View>
   );

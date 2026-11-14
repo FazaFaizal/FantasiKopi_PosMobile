@@ -1,3 +1,5 @@
+import type { PaymentMethod } from "./order-logic";
+
 export interface CartItem {
   productId: string;
   productName: string;
@@ -181,7 +183,7 @@ export function getQuickCashSuggestions(totalAmount: number): number[] {
  */
 export function validateOrderPayload(payload: {
   cart: CartItem[];
-  paymentMethod: "Tunai" | "QRIS";
+  paymentMethod: PaymentMethod;
   cashGiven?: number;
   customerName?: string;
 }): { isValid: boolean; error?: string } {
@@ -257,3 +259,46 @@ export function filterPosProducts(
   });
 }
 
+
+/**
+ * Parameter RPC create_order (audit iterasi 3, PRD 18).
+ * Hanya produk, jumlah, dan catatan yang dikirim: harga, subtotal, total, nomor order,
+ * dan status dihitung database dalam satu transaksi.
+ */
+export function buildCreateOrderParams(
+  cart: CartItem[],
+  options: {
+    customerName: string;
+    orderType: "Dine In" | "Take Away";
+    paymentMethod: PaymentMethod;
+    notes?: string | null;
+  }
+): {
+  p_items: { product_id: string; quantity: number; notes: string | null }[];
+  p_customer_name: string;
+  p_order_type: "Dine In" | "Take Away";
+  p_payment_method: PaymentMethod;
+  p_notes: string | null;
+} {
+  return {
+    p_items: cart.map((item) => ({
+      product_id: item.productId,
+      quantity: item.quantity,
+      notes: (item.notes || "").trim() || null,
+    })),
+    p_customer_name: (options.customerName || "").trim(),
+    p_order_type: options.orderType,
+    p_payment_method: options.paymentMethod,
+    p_notes: (options.notes || "").trim() || null,
+  };
+}
+
+/** Hasil RPC create_order (nomor order & total dibuat database). */
+export interface CreatedOrder {
+  id: string;
+  order_number: string;
+  total_amount: number;
+  order_status: string;
+  payment_status: string;
+  created_at: string;
+}

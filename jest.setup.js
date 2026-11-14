@@ -36,8 +36,20 @@ jest.mock("react-native-safe-area-context", () => ({
 }));
 
 // Mock vector icons
-jest.mock("@expo/vector-icons", () => ({
-  Ionicons: "Ionicons",
+jest.mock("@expo/vector-icons", () => {
+  const React = require("react");
+  const IoniconsMock = ({ name, ...props }) =>
+    React.createElement("span", { "data-icon": name, ...props }, name || "icon");
+  return {
+    Ionicons: IoniconsMock,
+  };
+});
+
+// Mock NetInfo
+jest.mock("@react-native-community/netinfo", () => ({
+  addEventListener: jest.fn(() => jest.fn()),
+  fetch: jest.fn(() => Promise.resolve({ isConnected: true, isInternetReachable: true })),
+  useNetInfo: jest.fn(() => ({ isConnected: true, isInternetReachable: true })),
 }));
 
 // Mock react-native-svg for lucide-react-native

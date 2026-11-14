@@ -14,6 +14,18 @@ export default function CustomerLayout() {
           title: 'Katalog Menu',
         }}
       />
+      <Stack.Screen
+        name="orders"
+        options={{
+          title: 'Pesanan Saya',
+        }}
+      />
+      <Stack.Screen
+        name="profile"
+        options={{
+          title: 'Profil Saya',
+        }}
+      />
     </Stack>
   );
 }

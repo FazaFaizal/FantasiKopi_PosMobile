@@ -45,6 +45,7 @@ export default function InactiveScreen() {
 
         <View className="w-full">
           <Button
+            accessibilityLabel="Keluar dari akun"
             title="Keluar dari Akun"
             variant="primary"
             icon={<Ionicons name="log-out-outline" size={18} color="#FFFFFF" />}

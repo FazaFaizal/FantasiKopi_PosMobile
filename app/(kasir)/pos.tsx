@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -33,9 +33,13 @@ import {
   calculateCashChange,
   getQuickCashSuggestions,
   validateOrderPayload,
-  generateOrderNumber,
   filterPosProducts,
+  buildCreateOrderParams,
+  CreatedOrder,
 } from '../../lib/pos-logic';
+import { isPosLocked } from '../../lib/shift-logic';
+import type { PaymentMethod } from '../../lib/order-logic';
+import { ShiftRequiredNotice } from '../../components/ShiftRequiredNotice';
 import { toggleProductAvailability } from '../../lib/product-logic';
 
 interface CategoryItem {
@@ -63,7 +67,7 @@ export default function KasirPOS() {
   const [cartModalVisible, setCartModalVisible] = useState(false);
   const [orderType, setOrderType] = useState<'Dine In' | 'Take Away'>('Dine In');
   const [customerName, setCustomerName] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Tunai' | 'QRIS'>('Tunai');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Tunai');
   const [cashGivenText, setCashGivenText] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
@@ -79,7 +83,7 @@ export default function KasirPOS() {
     customerName: string;
     cashierName: string;
     totalAmount: number;
-    paymentMethod: 'Tunai' | 'QRIS';
+    paymentMethod: PaymentMethod;
     orderType: 'Dine In' | 'Take Away';
     orderStatus: 'Processing';
     cashGiven: number;
@@ -120,6 +124,27 @@ export default function KasirPOS() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Sif kasir: POS terkunci sampai ada sif aktif (diperiksa ulang setiap layar difokuskan)
+  const [openShift, setOpenShift] = useState<{ id: string; status: string } | null>(null);
+  const [shiftLoading, setShiftLoading] = useState(true);
+  const fetchOpenShift = useCallback(async () => {
+    setShiftLoading(true);
+    const { data, error } = await supabase
+      .from('cash_shifts')
+      .select('id, status')
+      .eq('status', 'Open')
+      .maybeSingle();
+    if (error) console.error('Error fetching open shift:', error);
+    setOpenShift(data ?? null);
+    setShiftLoading(false);
+  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchOpenShift();
+    }, [fetchOpenShift])
+  );
+  const posLocked = isPosLocked(openShift);
 
   // Filter Produk Sesuai Kategori dan Input Pencarian
   const filteredProducts = useMemo(() => {
@@ -259,49 +284,28 @@ export default function KasirPOS() {
 
     try {
       setSubmittingOrder(true);
-      const generatedNumber = generateOrderNumber(new Date(), Date.now() % 10000);
       const cashierIdentifier = user?.email || 'Kasir Kedai';
 
-      // 1. Simpan Transaksi Induk ke tabel 'orders'
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          order_number: generatedNumber,
-          user_id: user?.id || null,
-          cashier_name: cashierIdentifier,
-          customer_name: customerName.trim() || 'Pelanggan Umum',
-          total_amount: total,
-          payment_method: paymentMethod,
-          payment_status: 'Lunas',
-          order_status: 'Processing',
-          order_type: orderType,
-          notes: paymentMethod === 'Tunai' ? `Bayar: ${formatRupiah(cashGivenNumber)}` : 'Pembayaran QRIS',
+      // Order & item disimpan atomik oleh database (create_order): harga, total,
+      // nomor order, dan status Paid/Processing ditentukan server.
+      const { data: created, error: orderError } = await supabase.rpc(
+        'create_order',
+        buildCreateOrderParams(cart, {
+          customerName: customerName.trim() || 'Pelanggan Umum',
+          orderType,
+          paymentMethod,
+          notes: paymentMethod === 'Tunai' ? `Bayar: ${formatRupiah(cashGivenNumber)}` : `Pembayaran ${paymentMethod}`,
         })
-        .select('id, created_at')
-        .single();
-
+      );
       if (orderError) throw orderError;
-
-      // 2. Simpan Rincian Item ke tabel 'order_items' (Pola Snapshot Harga & Nama)
-      const orderItemsPayload = cart.map((item) => ({
-        order_id: orderData.id,
-        product_id: item.productId,
-        product_name: item.productName,
-        unit_price: item.unitPrice,
-        quantity: item.quantity,
-        subtotal: item.unitPrice * item.quantity,
-        notes: item.notes || null,
-      }));
-
-      const { error: itemsError } = await supabase.from('order_items').insert(orderItemsPayload);
-      if (itemsError) throw itemsError;
+      const orderData = created as unknown as CreatedOrder;
 
       // 3. Simpan data untuk Struk Transaksi Digital
       setCompletedOrder({
-        orderNumber: generatedNumber,
+        orderNumber: orderData.order_number,
         customerName: customerName.trim() || 'Pelanggan Umum',
         cashierName: cashierIdentifier,
-        totalAmount: total,
+        totalAmount: Number(orderData.total_amount),
         paymentMethod,
         orderType,
         orderStatus: 'Processing',
@@ -523,7 +527,7 @@ export default function KasirPOS() {
                   paymentMethod === 'Tunai' ? 'text-primary' : 'text-muted'
                 }`}
               >
-                Tunai (Cash)
+                Tunai
               </Text>
             </TouchableOpacity>
 
@@ -545,7 +549,29 @@ export default function KasirPOS() {
                   paymentMethod === 'QRIS' ? 'text-primary' : 'text-muted'
                 }`}
               >
-                QRIS Digital
+                QRIS
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setPaymentMethod('Debit')}
+              className={`flex-1 py-2 px-3 rounded-chip border items-center flex-row justify-center ${
+                paymentMethod === 'Debit'
+                  ? 'bg-primary/10 border-primary'
+                  : 'bg-background border-line'
+              }`}
+            >
+              <Ionicons
+                name="card-outline"
+                size={16}
+                color={paymentMethod === 'Debit' ? '#D1001F' : '#6B7280'}
+              />
+              <Text
+                className={`font-heading-semibold text-xs ml-1.5 ${
+                  paymentMethod === 'Debit' ? 'text-primary' : 'text-muted'
+                }`}
+              >
+                Debit
               </Text>
             </TouchableOpacity>
           </View>
@@ -598,7 +624,9 @@ export default function KasirPOS() {
             <View className="mb-3 bg-amber-500/10 p-2.5 rounded-chip border border-amber-500/20 flex-row items-center">
               <Ionicons name="information-circle-outline" size={18} color="#B45309" />
               <Text className="font-body text-amber-800 text-[11px] ml-2 flex-1">
-                Arahkan pelanggan scan kode QRIS kedai di meja kasir. Tekan tombol di bawah setelah dana masuk.
+                {paymentMethod === 'Debit'
+                  ? 'Gesek/tap kartu pelanggan di mesin EDC. Tekan tombol di bawah setelah transaksi disetujui.'
+                  : 'Arahkan pelanggan scan kode QRIS kedai di meja kasir. Tekan tombol di bawah setelah dana masuk.'}
               </Text>
             </View>
           )}
@@ -639,8 +667,16 @@ export default function KasirPOS() {
         }
       />
 
+      {(shiftLoading || posLocked) && (
+        <ShiftRequiredNotice
+          loading={shiftLoading}
+          onOpenCash={() => router.replace('/(kasir)/cash')}
+          onRetry={fetchOpenShift}
+        />
+      )}
+
       {/* Main Content Layout (Split Screen di Tablet, Single Column di Phone) */}
-      <View className="flex-1 flex-row">
+      <View className="flex-1 flex-row" style={shiftLoading || posLocked ? { display: 'none' } : undefined}>
         {/* Katalog Menu (Left Side) */}
         <View className="flex-1">
           {/* Baris Pencarian & Profil Petugas */}
@@ -1020,10 +1056,30 @@ export default function KasirPOS() {
               </ScrollView>
             )}
 
+            {/* Tombol Cetak Struk Kasir */}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Cetak Struk"
+              onPress={() => {
+                Alert.alert(
+                  "Mencetak Struk Kasir",
+                  `Simulasi cetak struk untuk pesanan ${completedOrder?.orderNumber} berhasil dikirim ke antrean cetak.\n(Koneksi printer thermal fisik akan dihubungkan nanti).`,
+                  [{ text: "OK" }]
+                );
+              }}
+              className="mb-2.5 py-3 rounded-button bg-primary items-center justify-center flex-row shadow-sm"
+            >
+              <Ionicons name="print-outline" size={18} color="#FFFFFF" />
+              <Text className="font-heading-semibold text-white text-xs ml-2">
+                Cetak Struk (Printer Thermal)
+              </Text>
+            </TouchableOpacity>
+
             {/* Tombol Transaksi Baru & Lihat Riwayat */}
             <Button
               title="Transaksi Baru"
-              icon={<Ionicons name="refresh" size={18} color="#FFFFFF" />}
+              variant="outline"
+              icon={<Ionicons name="refresh" size={18} color="#D1001F" />}
               onPress={() => {
                 setReceiptModalVisible(false);
                 setCompletedOrder(null);

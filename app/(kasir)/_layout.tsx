@@ -44,6 +44,18 @@ export default function KasirLayout() {
             title: "Bahan Baku",
           }}
         />
+        <Tabs.Screen
+          name="cash"
+          options={{
+            title: "Kas Harian",
+          }}
+        />
+        <Tabs.Screen
+          name="profile"
+          options={{
+            title: "Profil Saya",
+          }}
+        />
       </Tabs>
 
       <SidebarDrawer

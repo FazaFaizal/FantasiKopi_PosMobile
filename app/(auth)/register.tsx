@@ -6,6 +6,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { Link, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { validatePassword } from '../../lib/auth-logic';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -45,11 +46,9 @@ export default function RegisterScreen() {
       isValid = false;
     }
 
-    if (!password) {
-      setPasswordError('Password wajib diisi');
-      isValid = false;
-    } else if (password.length < 6) {
-      setPasswordError('Password minimal 6 karakter');
+    const passwordCheck = validatePassword(password);
+    if (!passwordCheck.isValid) {
+      setPasswordError(passwordCheck.error || 'Password tidak valid');
       isValid = false;
     }
 
@@ -200,6 +199,7 @@ export default function RegisterScreen() {
               </View>
 
               <Button
+                accessibilityLabel="Daftarkan akun pelanggan"
                 title="Daftarkan Akun"
                 variant="primary"
                 isLoading={loading}
@@ -211,7 +211,7 @@ export default function RegisterScreen() {
             {/* Footer */}
             <View className="mt-6 flex-row justify-center items-center">
               <Text className="font-body text-muted text-sm">Sudah memiliki akun? </Text>
-              <Link href="/(auth)/login" className="font-heading-semibold text-primary text-sm py-2">
+              <Link accessibilityLabel="Kembali ke halaman masuk" href="/(auth)/login" className="font-heading-semibold text-primary text-sm py-2">
                 Masuk ke Akun
               </Link>
             </View>

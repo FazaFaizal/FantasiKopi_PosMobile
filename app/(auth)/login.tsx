@@ -147,6 +147,7 @@ export default function LoginScreen() {
               />
 
               <Button
+                accessibilityLabel="Masuk ke aplikasi"
                 title="Masuk Sekarang"
                 variant="primary"
                 className="mt-2"
@@ -160,6 +161,7 @@ export default function LoginScreen() {
             <View className="mt-6 flex-row justify-center items-center">
               <Text className="font-body text-muted text-sm">Pelanggan baru? </Text>
               <Link
+                accessibilityLabel="Daftar akun pelanggan baru"
                 href="/(auth)/register"
                 className="font-heading-semibold text-primary text-sm py-2"
               >

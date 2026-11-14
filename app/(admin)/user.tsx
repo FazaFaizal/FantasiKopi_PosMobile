@@ -23,6 +23,9 @@ import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { Ionicons } from '@expo/vector-icons';
 import { useResponsive } from '../../hooks/useResponsive';
+import { validateStaffAccountPayload } from '../../lib/staff-account-logic';
+import { canDeleteUserAccount } from '../../lib/auth-logic';
+import { useAuth } from '../../lib/AuthContext';
 
 type User = Database['public']['Tables']['users']['Row'];
 type Employee = Database['public']['Tables']['employees']['Row'];
@@ -36,6 +39,7 @@ interface UserWithEmployee extends User {
 
 export default function UserAccountScreen() {
   const { openSidebar } = useAdminSidebar();
+  const { user: currentUser } = useAuth();
   const { isTablet, columns } = useResponsive();
   const [users, setUsers] = useState<UserWithEmployee[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -176,47 +180,36 @@ export default function UserAccountScreen() {
   const handleCreateInternalUser = async () => {
     setNewEmailError('');
     setNewPasswordError('');
-    const cleanEmail = newEmail.trim();
-    if (!cleanEmail) {
-      setNewEmailError('Alamat email wajib diisi');
+    const validation = validateStaffAccountPayload({
+      email: newEmail,
+      password: newPassword,
+      role: newRole,
+      employeeId: newEmployeeId,
+    });
+    if (!validation.isValid || !validation.value) {
+      if (validation.errors.email) setNewEmailError(validation.errors.email);
+      if (validation.errors.password) setNewPasswordError(validation.errors.password);
+      if (validation.errors.role) Alert.alert('Role Tidak Valid', validation.errors.role);
       return;
     }
-    if (!cleanEmail.includes('@')) {
-      setNewEmailError('Format email tidak valid');
-      return;
-    }
-    if (!newPassword || newPassword.length < 6) {
-      setNewPasswordError('Password minimal 6 karakter');
-      return;
-    }
+    const payload = validation.value;
 
     setCreatingUser(true);
     try {
-      // Create user auth
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: newPassword,
+      // Akun dibuat di server (Edge Function) agar sesi Admin tidak tergantikan
+      // dan role langsung tersimpan dengan benar.
+      const { error: fnErr } = await supabase.functions.invoke('create-staff-user', {
+        body: payload,
       });
 
-      if (authErr) throw authErr;
-
-      if (authData.user) {
-        // Update user row role & employee link
-        const { error: updateErr } = await supabase
-          .from('users')
-          .update({
-            role: newRole,
-            employee_id: newEmployeeId,
-            status: 'Aktif',
-          })
-          .eq('id', authData.user.id);
-
-        if (updateErr) {
-          console.warn('Auto profile update error:', updateErr);
-        }
+      if (fnErr) {
+        // Ambil pesan error yang dikirim function (jika ada) agar mudah dipahami Admin.
+        const context = (fnErr as { context?: Response }).context;
+        const detail = context ? await context.json().catch(() => null) : null;
+        throw new Error(detail?.error || fnErr.message);
       }
 
-      Alert.alert('Sukses', `Akun ${newRole} baru untuk "${cleanEmail}" berhasil dibuat.`);
+      Alert.alert('Sukses', `Akun ${payload.role} baru untuk "${payload.email}" berhasil dibuat.`);
       setAddModalVisible(false);
       setNewEmail('');
       setNewPassword('');
@@ -231,9 +224,18 @@ export default function UserAccountScreen() {
   };
 
   const handleDeleteUser = (user: UserWithEmployee) => {
+    const check = canDeleteUserAccount(user, currentUser);
+    if (!check.allowed) {
+      Alert.alert('Tidak Dapat Dihapus', check.reason || 'Akun ini tidak dapat dihapus.');
+      return;
+    }
     Alert.alert(
       'Konfirmasi Hapus Akun',
-      `Hapus akun "${user.email}" secara permanen? Pengguna tidak akan dapat masuk lagi ke aplikasi.`,
+      `Hapus akun "${user.email}" secara permanen?
+
+Profil dan akun login akan ikut terhapus, sehingga pengguna tidak dapat masuk lagi. Riwayat transaksi tetap tersimpan.
+
+Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
       [
         { text: 'Batal', style: 'cancel' },
         {

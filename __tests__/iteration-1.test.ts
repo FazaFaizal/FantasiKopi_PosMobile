@@ -38,8 +38,9 @@ describe("Iterasi 1 - Autentikasi, Karyawan & Akun Pengguna (Auth & User Managem
   });
 
   describe("1.2 Validasi Password", () => {
-    it("menerima password 6 karakter atau lebih", () => {
-      expect(validatePassword("123456").isValid).toBe(true);
+    it("menerima password 8 karakter atau lebih (audit iterasi 1)", () => {
+      expect(validatePassword("123456").isValid).toBe(false);
+      expect(validatePassword("12345678").isValid).toBe(true);
       expect(validatePassword("password123").isValid).toBe(true);
     });
 
@@ -49,10 +50,10 @@ describe("Iterasi 1 - Autentikasi, Karyawan & Akun Pengguna (Auth & User Managem
       expect(res.error).toBe("Password wajib diisi");
     });
 
-    it("menolak password yang kurang dari 6 karakter", () => {
-      const res = validatePassword("12345");
+    it("menolak password yang kurang dari 8 karakter", () => {
+      const res = validatePassword("1234567");
       expect(res.isValid).toBe(false);
-      expect(res.error).toBe("Password minimal 6 karakter");
+      expect(res.error).toBe("Password minimal 8 karakter");
     });
   });
 

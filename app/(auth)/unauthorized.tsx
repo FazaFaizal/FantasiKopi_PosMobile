@@ -71,6 +71,7 @@ export default function UnauthorizedScreen() {
         {/* Action Buttons */}
         <View className="w-full gap-2.5">
           <Button
+            accessibilityLabel="Buka beranda sesuai peran akun"
             title={`Buka Beranda ${user?.role || "Aplikasi"}`}
             variant="primary"
             icon={
@@ -79,6 +80,7 @@ export default function UnauthorizedScreen() {
             onPress={handleReturnToHome}
           />
           <Button
+            accessibilityLabel="Keluar atau ganti akun"
             title="Keluar / Ganti Akun"
             variant="outline"
             icon={<Ionicons name="log-out-outline" size={18} color="#D1001F" />}

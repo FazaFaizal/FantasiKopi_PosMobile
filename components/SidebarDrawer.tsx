@@ -18,6 +18,11 @@ import LogOut from "lucide-react-native/icons/log-out";
 import X from "lucide-react-native/icons/x";
 import Store from "lucide-react-native/icons/store";
 import Receipt from "lucide-react-native/icons/receipt";
+import Wallet from "lucide-react-native/icons/wallet";
+import Banknote from "lucide-react-native/icons/banknote";
+import TrendingUp from "lucide-react-native/icons/trending-up";
+import ClipboardList from "lucide-react-native/icons/clipboard-list";
+import CircleUser from "lucide-react-native/icons/circle-user";
 import type { LucideIcon } from "lucide-react-native";
 import { useResponsive } from "../hooks/useResponsive";
 import { isRouteActive } from "../lib/navigation-logic";
@@ -43,6 +48,13 @@ export const SIDEBAR_NAV_ITEMS: {
       icon: LayoutDashboard,
     },
     {
+      id: "orders",
+      route: "/(admin)/orders",
+      title: "Pesanan",
+      subtitle: "Semua Order, Pembatalan & Koreksi Pembayaran",
+      icon: ClipboardList,
+    },
+    {
       id: "product",
       route: "/(admin)/product",
       title: "Katalog Produk",
@@ -56,8 +68,36 @@ export const SIDEBAR_NAV_ITEMS: {
       subtitle: "Inventaris Gudang & Peringatan Stok",
       icon: Package,
     },
+    {
+      id: "cash",
+      route: "/(admin)/cash",
+      title: "Kas Harian",
+      subtitle: "Rekap Uang Laci & Pengeluaran Hari Ini",
+      icon: Banknote,
+    },
+    {
+      id: "expense",
+      route: "/(admin)/expense",
+      title: "Biaya Operasional",
+      subtitle: "Pencatatan & Alokasi Pengeluaran",
+      icon: Wallet,
+    },
+    {
+      id: "report",
+      route: "/(admin)/report",
+      title: "Laporan & Finansial",
+      subtitle: "Analisis Penjualan & Laba Bersih",
+      icon: TrendingUp,
+    },
   ],
   management: [
+    {
+      id: "profile",
+      route: "/(admin)/profile",
+      title: "Profil Saya",
+      subtitle: "Akun & Ganti Password",
+      icon: CircleUser,
+    },
     {
       id: "category",
       route: "/(admin)/category",
@@ -107,6 +147,20 @@ export const KASIR_NAV_ITEMS: {
       title: "Bahan Baku & Stok",
       subtitle: "Inventaris Gudang & Mutasi Bahan",
       icon: Package,
+    },
+    {
+      id: "cash",
+      route: "/(kasir)/cash",
+      title: "Kas Harian",
+      subtitle: "Rekap Uang Laci & Pengeluaran Harian",
+      icon: Banknote,
+    },
+    {
+      id: "profile",
+      route: "/(kasir)/profile",
+      title: "Profil Saya",
+      subtitle: "Akun & Ganti Password",
+      icon: CircleUser,
     },
   ],
 };

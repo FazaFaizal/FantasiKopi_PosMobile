@@ -479,7 +479,7 @@ describe("Iterasi 3 - Terminal POS Kasir & Transaksi Pemesanan (POS Terminal & O
         customer_name: "Budi Santoso",
         total_amount: 50000,
         payment_method: "Tunai",
-        payment_status: "Lunas",
+        payment_status: "Paid",
         order_status: "Completed",
         created_at: "2026-10-24T10:00:00Z",
       },
@@ -489,7 +489,7 @@ describe("Iterasi 3 - Terminal POS Kasir & Transaksi Pemesanan (POS Terminal & O
         customer_name: "Siti Rahma",
         total_amount: 32000,
         payment_method: "QRIS",
-        payment_status: "Lunas",
+        payment_status: "Paid",
         order_status: "Processing",
         created_at: "2026-10-24T11:00:00Z",
       },
@@ -532,6 +532,315 @@ describe("Iterasi 3 - Terminal POS Kasir & Transaksi Pemesanan (POS Terminal & O
       expect(getOrderStatusBadgeTone("Processing")).toBe("accent");
       expect(getOrderStatusBadgeTone("Completed")).toBe("success");
       expect(getOrderStatusBadgeTone("Cancelled")).toBe("danger");
+    });
+  });
+
+  // ============================================================================
+  // BAGIAN 3.10: PENGELOLAAN PENGELUARAN (EXPENSE) OPERASIONAL KEDAI (PRD Section 21)
+  // ============================================================================
+  describe("3.10 Validasi Pengeluaran (Expense) & Kategori Operasional", () => {
+    const {
+      validateExpenseInput,
+      filterExpenses,
+      EXPENSE_CATEGORIES,
+      getExpenseCategoryMeta,
+    } = require("../lib/expense-logic");
+
+    it("menolak input jika deskripsi kosong atau kurang dari 3 karakter", () => {
+      const resEmpty = validateExpenseInput({
+        description: "",
+        category: "Operational",
+        amount: 50000,
+        expense_date: "2026-11-09",
+      });
+      expect(resEmpty.isValid).toBe(false);
+      expect(resEmpty.errors.description).toContain("wajib diisi");
+
+      const resShort = validateExpenseInput({
+        description: "ab",
+        category: "Operational",
+        amount: 50000,
+        expense_date: "2026-11-09",
+      });
+      expect(resShort.isValid).toBe(false);
+      expect(resShort.errors.description).toContain("minimal 3 karakter");
+    });
+
+    it("menolak kategori pengeluaran yang tidak valid", () => {
+      const res = validateExpenseInput({
+        description: "Beli Token Listrik",
+        category: "Investasi" as any,
+        amount: 100000,
+        expense_date: "2026-11-09",
+      });
+      expect(res.isValid).toBe(false);
+      expect(res.errors.category).toBeDefined();
+    });
+
+    it("menolak nominal biaya <= 0 atau non-numerik", () => {
+      const resZero = validateExpenseInput({
+        description: "Beli Gula Pasir 10kg",
+        category: "Raw Material",
+        amount: 0,
+        expense_date: "2026-11-09",
+      });
+      expect(resZero.isValid).toBe(false);
+      expect(resZero.errors.amount).toContain("lebih dari 0");
+
+      const resNegative = validateExpenseInput({
+        description: "Beli Gula Pasir 10kg",
+        category: "Raw Material",
+        amount: -50000,
+        expense_date: "2026-11-09",
+      });
+      expect(resNegative.isValid).toBe(false);
+    });
+
+    it("menolak format tanggal yang tidak valid", () => {
+      const res = validateExpenseInput({
+        description: "Servis Mesin Espresso",
+        category: "Equipment",
+        amount: 350000,
+        expense_date: "tanggal-kemarin",
+      });
+      expect(res.isValid).toBe(false);
+      expect(res.errors.expense_date).toContain("Format tanggal tidak valid");
+    });
+
+    it("menerima payload pengeluaran yang valid", () => {
+      const res = validateExpenseInput({
+        description: "Biji Kopi Arabika 5kg",
+        category: "Raw Material",
+        amount: 650000,
+        expense_date: "2026-11-09",
+      });
+      expect(res.isValid).toBe(true);
+      expect(Object.keys(res.errors)).toHaveLength(0);
+    });
+
+    it("mendefinisikan 4 kategori pengeluaran resmi sesuai PRD Section 21", () => {
+      expect(EXPENSE_CATEGORIES).toEqual([
+        "Raw Material",
+        "Operational",
+        "Equipment",
+        "Other",
+      ]);
+      expect(getExpenseCategoryMeta("Raw Material").label).toBe("Bahan Baku");
+      expect(getExpenseCategoryMeta("Operational").label).toBe("Operasional & Utilitas");
+    });
+
+    it("memfilter data pengeluaran berdasarkan kategori dan pencarian teks", () => {
+      const mockExpenses = [
+        {
+          id: "exp-1",
+          description: "Susu UHT Diamond 1 Dus",
+          category: "Raw Material",
+          amount: 210000,
+          expense_date: "2026-11-09",
+        },
+        {
+          id: "exp-2",
+          description: "Listrik PLN & Air PDAM",
+          category: "Operational",
+          amount: 450000,
+          expense_date: "2026-11-08",
+        },
+        {
+          id: "exp-3",
+          description: "Portafilter 58mm Baru",
+          category: "Equipment",
+          amount: 320000,
+          expense_date: "2026-11-01",
+        },
+      ];
+
+      const rawOnly = filterExpenses(mockExpenses, { category: "Raw Material" });
+      expect(rawOnly).toHaveLength(1);
+      expect(rawOnly[0].id).toBe("exp-1");
+
+      const searchSusu = filterExpenses(mockExpenses, { searchQuery: "susu" });
+      expect(searchSusu).toHaveLength(1);
+      expect(searchSusu[0].id).toBe("exp-1");
+    });
+  });
+
+  // ============================================================================
+  // BAGIAN 3.11: KALKULASI LAPORAN PENJUALAN (SALES REPORT - PRD Section 22)
+  // ============================================================================
+  describe("3.11 Kalkulasi Laporan Penjualan (Hanya Order Lunas & Produk Terlaris)", () => {
+    const { calculateSalesReport } = require("../lib/report-logic");
+
+    const sampleOrders = [
+      {
+        id: "ord-1",
+        total_amount: 50000,
+        order_status: "Completed",
+        payment_status: "Paid",
+        created_at: "2026-11-09T10:00:00Z",
+      },
+      {
+        id: "ord-2",
+        total_amount: 30000,
+        order_status: "Completed",
+        payment_status: "Paid",
+        created_at: "2026-11-09T11:30:00Z",
+      },
+      {
+        id: "ord-3",
+        total_amount: 40000,
+        order_status: "Cancelled", // Tidak boleh dihitung
+        payment_status: "Refunded",
+        created_at: "2026-11-09T12:00:00Z",
+      },
+      {
+        id: "ord-4",
+        total_amount: 25000,
+        order_status: "Pending", // Belum dibayar: tidak boleh dihitung
+        payment_status: "Pending",
+        created_at: "2026-11-09T13:00:00Z",
+      },
+    ];
+
+    const sampleOrderItems = [
+      {
+        id: "item-1",
+        order_id: "ord-1",
+        product_id: "p-kopi",
+        product_name: "Kopi Susu Gula Aren",
+        quantity: 2,
+        subtotal: 48000,
+      },
+      {
+        id: "item-2",
+        order_id: "ord-1",
+        product_id: "p-snack",
+        product_name: "Croissant",
+        quantity: 1,
+        subtotal: 2000,
+      },
+      {
+        id: "item-3",
+        order_id: "ord-2",
+        product_id: "p-kopi",
+        product_name: "Kopi Susu Gula Aren",
+        quantity: 1,
+        subtotal: 24000,
+      },
+      {
+        id: "item-4",
+        order_id: "ord-3", // Dari order Cancelled
+        product_id: "p-matcha",
+        product_name: "Matcha Latte",
+        quantity: 5,
+        subtotal: 125000,
+      },
+    ];
+
+    it("hanya mengakumulasi omzet dari pesanan yang sudah lunas dan tidak dibatalkan", () => {
+      const report = calculateSalesReport(sampleOrders, sampleOrderItems);
+      // Hanya ord-1 (50000) dan ord-2 (30000)
+      expect(report.totalRevenue).toBe(80000);
+      expect(report.totalPaidOrders).toBe(2);
+      expect(report.totalItemsSold).toBe(4); // 2 kopi + 1 snack + 1 kopi
+      expect(report.averageOrderValue).toBe(40000); // 80000 / 2
+    });
+
+    it("mengagregasikan top produk terlaris dari pesanan yang selesai", () => {
+      const report = calculateSalesReport(sampleOrders, sampleOrderItems);
+      // Kopi Susu terjual 3x, Croissant 1x. Matcha latte tidak dihitung karena order cancelled
+      expect(report.topProducts[0].productName).toBe("Kopi Susu Gula Aren");
+      expect(report.topProducts[0].quantitySold).toBe(3);
+      expect(report.topProducts[0].totalRevenue).toBe(72000);
+
+      const hasMatcha = report.topProducts.some((p: any) => p.productName === "Matcha Latte");
+      expect(hasMatcha).toBe(false);
+    });
+
+    it("mengembalikan nilai 0 aman jika tidak ada order lunas", () => {
+      const emptyReport = calculateSalesReport([], []);
+      expect(emptyReport.totalRevenue).toBe(0);
+      expect(emptyReport.totalPaidOrders).toBe(0);
+      expect(emptyReport.averageOrderValue).toBe(0);
+      expect(emptyReport.topProducts).toEqual([]);
+    });
+  });
+
+  // ============================================================================
+  // BAGIAN 3.12: KALKULASI LAPORAN KEUANGAN (FINANCIAL REPORT - PRD Section 22)
+  // ============================================================================
+  describe("3.12 Kalkulasi Laporan Keuangan (Sales - Expenses = Net Profit)", () => {
+    const { calculateFinancialReport } = require("../lib/report-logic");
+
+    const sampleOrders = [
+      {
+        id: "ord-1",
+        total_amount: 150000,
+        order_status: "Completed",
+        payment_status: "Paid",
+        created_at: "2026-11-09T10:00:00Z",
+      },
+      {
+        id: "ord-2",
+        total_amount: 50000,
+        order_status: "Completed",
+        payment_status: "Paid",
+        created_at: "2026-11-09T11:00:00Z",
+      },
+    ];
+
+    const sampleExpenses = [
+      {
+        id: "exp-1",
+        category: "Raw Material",
+        amount: 80000,
+        expense_date: "2026-11-09",
+      },
+      {
+        id: "exp-2",
+        category: "Operational",
+        amount: 40000,
+        expense_date: "2026-11-09",
+      },
+    ];
+
+    it("menghitung laba bersih (Net Result = Total Sales - Total Expense)", () => {
+      const fin = calculateFinancialReport(sampleOrders, sampleExpenses);
+      expect(fin.totalSales).toBe(200000);
+      expect(fin.totalExpenses).toBe(120000);
+      expect(fin.netProfit).toBe(80000);
+      expect(fin.profitMargin).toBe(40); // (80000 / 200000) * 100 = 40%
+    });
+
+    it("menghitung breakdown alokasi pengeluaran per kategori beserta persentasenya", () => {
+      const fin = calculateFinancialReport(sampleOrders, sampleExpenses);
+      const rawCat = fin.categoryBreakdown.find(
+        (c: any) => c.category === "Raw Material"
+      );
+      expect(rawCat).toBeDefined();
+      expect(rawCat.totalAmount).toBe(80000);
+      expect(rawCat.percentage).toBeCloseTo(66.67, 1); // 80000 / 120000 * 100 = 66.67%
+
+      const opCat = fin.categoryBreakdown.find(
+        (c: any) => c.category === "Operational"
+      );
+      expect(opCat.totalAmount).toBe(40000);
+      expect(opCat.percentage).toBeCloseTo(33.33, 1);
+    });
+
+    it("menangani kondisi rugi (expense > sales) dengan aman", () => {
+      const hugeExpenses = [
+        {
+          id: "exp-x",
+          category: "Equipment",
+          amount: 500000,
+          expense_date: "2026-11-09",
+        },
+      ];
+      const fin = calculateFinancialReport(sampleOrders, hugeExpenses);
+      expect(fin.totalSales).toBe(200000);
+      expect(fin.totalExpenses).toBe(500000);
+      expect(fin.netProfit).toBe(-300000); // Defisit / Rugi
+      expect(fin.profitMargin).toBe(-150);
     });
   });
 });

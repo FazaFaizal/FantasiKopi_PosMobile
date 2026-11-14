@@ -257,6 +257,8 @@ describe("Shared UI & Responsive Architecture (UI Components, Sidebar & Tablet L
       expect(mainRoutes).toContain("/(admin)/dashboard");
       expect(mainRoutes).toContain("/(admin)/product");
       expect(mainRoutes).toContain("/(admin)/inventory");
+      expect(mainRoutes).toContain("/(admin)/expense");
+      expect(mainRoutes).toContain("/(admin)/report");
 
       const mgmtRoutes = SIDEBAR_NAV_ITEMS.management.map((i) => i.route);
       expect(mgmtRoutes).toContain("/(admin)/category");

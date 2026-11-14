@@ -399,6 +399,12 @@ Admin dapat:
 
 User Account Customer dibuat oleh Customer melalui registrasi (lihat 6.2), bukan oleh Admin.
 
+Pembuatan User Account internal dilakukan di sisi server (Edge Function `create-staff-user`) agar:
+
+* Sesi Admin yang sedang login tidak tergantikan oleh akun baru.
+* Role (Admin/Kasir) dan relasi Employee langsung tersimpan; jika gagal, akun dibatalkan (rollback).
+* Akun langsung aktif tanpa perlu konfirmasi email.
+
 Role yang tersedia:
 
 ```text
@@ -466,6 +472,8 @@ Tidak Tersedia
 
 Status Product diatur secara manual dan tidak dihitung dari stok bahan baku.
 
+Kasir hanya dapat mengubah status ketersediaan Product (Tersedia / Tidak Tersedia). Perubahan data Product lain (nama, harga, kategori, gambar, aktif/nonaktif) hanya dapat dilakukan Admin dan ditegakkan oleh sistem.
+
 Product dengan status Tidak Tersedia tetap ditampilkan, tetapi tidak dapat ditambahkan ke Cart atau digunakan untuk membuat Order baru.
 
 Penghapusan Product menggunakan metode **Hard Delete dengan Snapshot Pattern**:
@@ -523,6 +531,7 @@ Penghapusan bahan baku menggunakan metode **Hard Delete dengan Snapshot Pattern 
 * Baris bahan baku dihapus secara fisik dari tabel `inventory_items` di database Supabase (`DELETE FROM inventory_items`).
 * Riwayat perubahan stok pada tabel `stock_movements` tetap tersimpan utuh dan terlindungi melalui relasi `inventory_id REFERENCES inventory_items(id) ON DELETE SET NULL` serta kolom data snapshot (`item_name TEXT NOT NULL`, `item_unit TEXT NOT NULL`, `user_name TEXT`).
 * Kasir dilarang keras menghapus bahan baku (hanya Admin yang memiliki hak akses hapus).
+* Sistem tidak menggunakan soft delete untuk bahan baku.
 
 ---
 
@@ -538,7 +547,12 @@ Digunakan untuk mencatat penambahan stok bahan baku, misalnya:
 * Restock.
 * Penerimaan bahan baku.
 
-Stock In hanya mencatat perubahan stok dan tidak otomatis tercatat sebagai Expense. Pengeluaran pembelian bahan baku dicatat terpisah melalui Expense.
+Stock In tidak otomatis tercatat sebagai Expense. Namun saat mencatat Stock In, Admin atau Kasir **dapat menandainya sebagai pembelian** dan mengisi total harga untuk bahan tersebut. Jika ditandai:
+
+* Sistem mencatat mutasi stok dan Expense sekaligus dalam satu transaksi (tidak mungkin hanya salah satu yang tersimpan).
+* Expense dibuat dengan kategori Raw Material, deskripsi otomatis "Pembelian <bahan> <jumlah> <satuan>", tanggal hari ini (WIB), dan terhubung ke Stock In tersebut.
+* Satu Stock In paling banyak memiliki satu Expense, sehingga biaya tidak tercatat ganda.
+* Stock In yang bukan pembelian (pemberian, retur, dan sebagainya) cukup tidak ditandai.
 
 ## 12.2 Stock Out
 
@@ -559,8 +573,10 @@ Digunakan untuk menyesuaikan jumlah stok berdasarkan kondisi aktual, misalnya:
 ## 12.4 Aturan Perubahan Stok
 
 * Stok tidak dapat bernilai negatif. Stock Out atau Stock Adjustment yang membuat stok di bawah 0 ditolak.
-* Jumlah perubahan harus lebih besar dari 0.
+* Jumlah perubahan harus lebih besar dari 0. Untuk Stock Adjustment (opname), yang diisi adalah stok fisik aktual; nilai 0 diperbolehkan (bahan habis), sedangkan nilai yang sama dengan stok sistem ditolak.
 * Riwayat perubahan stok tidak dapat diubah atau dihapus.
+* Angka stok hanya dapat berubah melalui riwayat mutasi (Stock In, Stock Out, Stock Adjustment). Mengubah angka stok secara langsung ditolak sistem, termasuk oleh Admin.
+* Stok sebelum dan sesudah dihitung oleh sistem (database) dengan mengunci data bahan baku, sehingga dua perubahan bersamaan tidak saling menimpa.
 
 Setiap perubahan stok mencatat:
 
@@ -661,11 +677,19 @@ Admin dapat:
 * Memproses refund.
 * Melihat dan mengoreksi data Payment.
 
+Implementasi: halaman Pesanan Admin memakai layar yang sama dengan Riwayat Pesanan Kasir (filter, detail, konfirmasi pembayaran, pembatalan/refund). Daftar dimuat bertahap (50 Order per halaman, tombol "Muat lebih banyak"), dan filter tanggal "Hari ini" mengikuti hari bisnis WITA.
+
+Koreksi data Payment:
+
+* Hanya Admin yang dapat mengubah Payment Method (Tunai / QRIS / Debit) pada Order yang sudah Paid, misalnya bila kasir salah memilih metode.
+* Setiap koreksi otomatis dicatat pada catatan Order: siapa yang mengoreksi serta metode lama → baru. Aturan ini ditegakkan oleh database, sehingga Kasir tidak dapat mengubah Payment Method.
+* Koreksi ikut menyesuaikan rekap kas sif yang masih aktif; sif yang sudah ditutup tidak berubah.
+
 ---
 
 # 16. Payment
 
-> **Catatan:** Detail alur Payment, terutama untuk Customer Ordering, ditunda dan akan ditentukan kemudian. Isi section ini belum final.
+> **Catatan:** Alur pembayaran Customer Ordering versi awal sudah ditetapkan (lihat "Pembayaran Customer" di bawah). Integrasi payment gateway tetap di luar scope.
 
 Payment merupakan data pembayaran yang berkaitan dengan Order.
 
@@ -674,10 +698,12 @@ Payment dapat dikelola oleh Admin.
 Payment Method versi awal:
 
 ```text
-Cash
+Tunai
 QRIS
 Debit
 ```
+
+Hanya pembayaran Tunai yang masuk ke laci kas. QRIS dan Debit (mesin EDC) adalah pembayaran non-tunai: dicatat terpisah pada rekap kas dan sif, serta tidak mengurangi atau menambah uang laci (termasuk saat refund).
 
 Untuk Cash:
 
@@ -694,6 +720,21 @@ Paid
 Failed
 Refunded
 ```
+
+Hanya empat nilai ini yang disimpan di database (nilai lama `Lunas` dan `Batal` tidak digunakan lagi). Tampilan memakai label Bahasa Indonesia:
+
+| Status | Label |
+|---|---|
+| Paid | Lunas |
+| Pending | Belum Dibayar (atau Tidak Dibayar jika Order Cancelled) |
+| Refunded | Dikembalikan |
+| Failed | Gagal |
+
+Pembayaran Customer (tanpa payment gateway):
+
+1. Order Customer selalu dibuat dengan Payment Status **Pending**, baik Tunai maupun QRIS. Customer tidak dapat menandai pembayarannya sendiri sebagai Paid.
+2. Customer membayar di kasir (tunai, atau scan QRIS kedai dan menunjukkan bukti).
+3. Kasir memverifikasi (uang diterima / mutasi QRIS masuk di aplikasi merchant) lalu menekan **Konfirmasi Pembayaran**. Untuk order Pending, aksi ini sekaligus menerima order (Payment Status → Paid, Order Status → Processing).
 
 Integrasi dengan payment gateway tidak termasuk dalam versi awal kecuali ditentukan pada tahap implementasi berikutnya.
 
@@ -729,15 +770,20 @@ Status Order harus menunjukkan kondisi aktual Order dan tidak boleh hanya diguna
 
 Payment Status dan Order Status merupakan dua informasi yang berbeda.
 
+Gerbang pembayaran: Order tidak dapat berstatus Processing, Ready, atau Completed sebelum Payment Status lunas (Paid). Aturan ini ditegakkan oleh database, sehingga kedai tidak menyiapkan pesanan yang belum dibayar.
+
+Kasir dapat menyelesaikan sekaligus seluruh Order berstatus Ready yang sudah lunas (aksi "Selesaikan Pesanan Siap").
+
 ## 17.1 Pembatalan dan Refund
 
-Pembatalan dan refund dapat dilakukan oleh Admin dan Kasir.
+Pembatalan dan refund dapat dilakukan oleh Admin dan Kasir. Customer dapat membatalkan Order miliknya sendiri selama Order masih Pending dan belum dibayar (lihat bagian 26).
 
 Aturan:
 
 * Order dengan status Pending, Processing, atau Ready dapat dibatalkan dan statusnya berubah menjadi Cancelled.
 * Order dengan status Completed atau Cancelled tidak dapat dibatalkan.
 * Jika Order yang dibatalkan sudah berstatus Paid, refund diproses dan Payment Status berubah menjadi Refunded.
+* Jika Order yang dibatalkan belum dibayar, Payment Status tetap Pending (tidak ada uang yang berpindah); pembatalan tercatat pada Order Status Cancelled.
 * Setiap pembatalan dan refund mencatat user yang melakukan, waktu, dan alasan.
 * Pembatalan Order tidak memengaruhi stok bahan baku karena Inventory tidak terintegrasi dengan penjualan.
 
@@ -759,6 +805,8 @@ Proses tersebut harus dilakukan secara konsisten sehingga tidak terjadi kondisi 
 * Order tersimpan tetapi Order Item tidak tersimpan.
 * Payment berhasil tetapi Order tidak tercatat.
 * Order tercatat tetapi Payment tidak tercatat.
+
+Implementasi: Order dan seluruh Order Item disimpan dalam satu transaksi database (`create_order`). Harga, subtotal, dan total dihitung dari data Product di database, bukan dari aplikasi; jika salah satu item tidak valid (misalnya Product sudah Tidak Tersedia), seluruh Order dibatalkan sehingga tidak ada Order tanpa item.
 
 ---
 
@@ -785,7 +833,45 @@ Hanya Admin yang dapat mengoreksi data Payment.
 
 # 20. Expense Management
 
-Expense hanya dapat dikelola oleh Admin.
+Expense hanya dapat dikelola oleh Admin. Pengecualian: Kasir dapat menghasilkan Expense pembelian bahan baku melalui Stock In yang ditandai sebagai pembelian (lihat Section 12.1); mengubah dan menghapus Expense tetap hanya dapat dilakukan Admin.
+
+Expense mencatat uang yang dikeluarkan pada hari tersebut, termasuk yang dibayar menggunakan pemasukan hari itu.
+
+Setiap Expense memiliki penanda **Dibayar dari kas laci** (default: ya). Admin dapat mematikannya untuk pengeluaran yang dibayar lewat transfer atau sumber lain, sehingga tidak mengurangi perhitungan uang laci.
+
+Kasir dapat mencatat pengeluaran harian (misalnya es batu, gas, parkir) dengan aturan:
+
+* Tanggal selalu hari ini (WIB) dan dianggap dibayar dari kas laci.
+* Tercatat atas nama Kasir yang mencatat.
+* Kasir hanya dapat melihat pengeluaran hari ini; mengubah dan menghapus tetap hanya Admin.
+
+## 20.1 Kas Harian
+
+Kasir dan Admin dapat melihat rekap kas hari ini (WIB):
+
+```text
+Penjualan Tunai (order lunas & tidak Cancelled)
+- Pengeluaran dari kas laci
+------------------------------------------------
+Uang seharusnya di laci
+```
+
+Rekap juga menampilkan penjualan QRIS (tidak masuk laci), pengeluaran dari sumber lain, dan jumlah order yang belum dibayar. Pencocokan uang fisik dilakukan saat tutup sif (Section 20.2).
+
+## 20.2 Sif Kasir (Buka / Tutup Sif)
+
+Fantasi Coffee memakai satu laci kas dengan sif bergantian (misalnya sif pagi dan sif malam). Uang di laci terakumulasi lintas sif sampai disetor.
+
+Aturan:
+
+* Hanya ada satu sif aktif dalam satu waktu.
+* POS terkunci sampai sif dibuka. Menerima pembayaran, memproses refund, dan mencatat pengeluaran dari kas (termasuk Stock In pembelian) oleh Kasir ditolak jika tidak ada sif aktif.
+* **Buka sif:** Kasir mengisi modal awal di laci. Sistem menyarankan modal awal = uang dihitung − uang disetor pada sif terakhir. Jika berbeda, Kasir wajib mengisi catatan.
+* Uang tunai masuk ke sif saat pembayaran diterima (bukan saat order dibuat); refund tunai mengurangi kas pada sif tempat refund dilakukan.
+* Kas seharusnya = modal awal + tunai diterima − refund tunai − pengeluaran dari kas.
+* **Tutup sif:** Kasir menghitung uang fisik di laci dan (opsional) mengisi uang yang disetor/diambil. Jika ada selisih, catatan wajib diisi. Sisa uang (dihitung − disetor) menjadi modal awal sif berikutnya.
+* Sif dapat ditutup oleh Kasir yang membukanya atau oleh Admin (misalnya sif yang lupa ditutup).
+* Riwayat sif (modal, kas seharusnya, uang dihitung, disetor, selisih, dan catatan) tidak dapat diubah dan dapat dilihat Admin.
 
 Admin dapat:
 
@@ -812,6 +898,7 @@ Expense memiliki:
 * Amount.
 * Date.
 * Creator.
+* Stock In terkait (jika berasal dari Stock In pembelian).
 * Created At.
 * Updated At.
 
@@ -821,7 +908,9 @@ Expense memiliki:
 
 Admin dapat melihat laporan penjualan berdasarkan periode.
 
-Laporan penjualan hanya menghitung Order dengan status **Completed**. Order Cancelled tidak dihitung.
+Laporan penjualan menghitung Order yang **sudah lunas (Paid) dan tidak Cancelled**, apa pun status dapurnya (Processing, Ready, atau Completed). Order Cancelled dan Order yang belum dibayar tidak dihitung.
+
+Alasan: penjualan diakui saat uang diterima. Jika omzet hanya dihitung dari status Completed, order yang sudah dibayar tetapi lupa ditutup kasir tidak masuk laporan sehingga omzet tercatat lebih kecil dari uang yang diterima.
 
 Informasi minimal:
 
@@ -835,6 +924,10 @@ Filter berdasarkan:
 
 * Hari.
 * Rentang tanggal.
+
+Laporan dihitung oleh database untuk periode yang dipilih, sehingga tetap akurat berapa pun jumlah transaksinya.
+
+Zona waktu: seluruh batas "hari" di sistem (laporan, dashboard, kas harian, sif, nomor order, tanggal Expense) memakai zona waktu kedai, yaitu **WITA (Asia/Makassar, UTC+8)**, bukan zona waktu perangkat.
 
 ---
 
@@ -851,7 +944,7 @@ Total Sales
 Net Result
 ```
 
-Total Sales dihitung dari total Order dengan status **Completed** pada periode yang dipilih.
+Total Sales dihitung dari total Order yang **sudah lunas dan tidak Cancelled** pada periode yang dipilih (aturan yang sama dengan Sales Report).
 
 Total Expense dihitung dari Expense yang dicatat manual pada periode yang dipilih. Stock In tidak otomatis menjadi Expense.
 
@@ -923,7 +1016,7 @@ Checkout menampilkan:
 * Nomor meja untuk Dine-in (opsional).
 * Payment Method.
 
-Alur Payment untuk Customer ditunda dan akan ditentukan kemudian (lihat Section 16).
+Alur Payment untuk Customer mengikuti "Pembayaran Customer" pada Section 16: order dibuat dengan Payment Status Pending dan baru diproses setelah kasir mengonfirmasi pembayaran.
 
 ---
 
@@ -943,6 +1036,12 @@ Cancelled
 
 Customer hanya dapat melihat Order yang berkaitan dengan User Account miliknya.
 
+Pembatalan oleh Customer:
+
+* Customer dapat membatalkan Order miliknya selama Order Status Pending dan Payment Status Pending (belum dibayar), dengan mengisi alasan (minimal 3 karakter).
+* Setelah kasir mengonfirmasi pembayaran atau Order sudah diproses, Customer tidak dapat membatalkan sendiri dan harus menghubungi kasir.
+* Pembatalan dilakukan melalui fungsi database yang mengunci baris Order, sehingga tidak bentrok dengan kasir yang sedang mengonfirmasi pembayaran. Payment Status tetap Pending karena tidak ada uang yang berpindah, dan pembatalan mencatat user, waktu, dan alasan.
+
 ---
 
 # 27. Admin Dashboard
@@ -953,8 +1052,9 @@ Dashboard menampilkan ringkasan operasional seperti:
 
 ### Sales
 
-* Total Sales hari ini.
+* Total Sales hari ini (Order lunas & tidak Cancelled).
 * Jumlah Order hari ini.
+* Jumlah Order yang masih menunggu pembayaran.
 * Product terlaris.
 
 ### Inventory
@@ -1001,6 +1101,7 @@ Category
 Product
 Inventory
 Order
+Kas Harian
 Report
 Profile
 ```
@@ -1011,6 +1112,7 @@ Profile
 POS
 Order History
 Inventory
+Kas Harian
 Profile
 ```
 
@@ -1024,6 +1126,8 @@ Profile
 ```
 
 Navigation harus menyesuaikan role dan tidak menampilkan fitur yang tidak memiliki hak akses.
+
+Halaman Profile (semua role) menampilkan email, role, status, dan tanggal terdaftar; menyediakan ganti password (password lama wajib diverifikasi ulang, password baru minimal 8 karakter dan berbeda dari password lama); serta tombol keluar dengan konfirmasi. Admin dan Kasir membuka Profile dari sidebar; Customer membuka Profile dari tombol di header halaman Product.
 
 ---
 
