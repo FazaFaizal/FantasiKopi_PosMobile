@@ -1,9 +1,11 @@
 // Edge Function: create-midtrans-payment
-// Membuat halaman pembayaran QRIS (Midtrans Snap) untuk pesanan online milik customer.
+// Membuat transaksi QRIS (Midtrans Core API /v2/charge) untuk pesanan online milik customer
+// dan mengembalikan URL gambar QR yang ditampilkan langsung di aplikasi.
 // Server key Midtrans dibaca dari Supabase Secrets (MIDTRANS_SERVER_KEY) dan tidak pernah
-// dikirim ke aplikasi. MIDTRANS_IS_PRODUCTION=true untuk mode produksi (default sandbox).
+// dikirim ke aplikasi; key butuh izin "Core API: Write". MIDTRANS_IS_PRODUCTION=true untuk
+// mode produksi (default sandbox).
 import { withSupabase } from 'npm:@supabase/server@1';
-import { SNAP_URL, basicAuthHeader, buildSnapTransaction } from '../_shared/midtrans.ts';
+import { CORE_CHARGE_URL, basicAuthHeader, buildQrisCharge, extractQrCodeUrl } from '../_shared/midtrans.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (body: unknown, status = 200) => Response.json(body, { status });
@@ -36,8 +38,9 @@ export default {
     if (order.payment_due_at && new Date(order.payment_due_at).getTime() <= Date.now()) {
       return json({ error: 'Batas waktu pembayaran sudah habis. Silakan pesan kembali.' }, 410);
     }
+    // QR sudah dibuat sebelumnya (mis. customer membuka ulang layar bayar).
     if (order.gateway_redirect_url) {
-      return json({ redirect_url: order.gateway_redirect_url });
+      return json({ qr_url: order.gateway_redirect_url, due_at: order.payment_due_at });
     }
 
     const { data: items } = await ctx.supabase
@@ -48,12 +51,12 @@ export default {
 
     let payload;
     try {
-      payload = buildSnapTransaction(order, items ?? [], { email: profile?.email ?? null });
+      payload = buildQrisCharge(order, items ?? [], { email: profile?.email ?? null });
     } catch (err) {
       return json({ error: (err as Error).message }, 500);
     }
 
-    const res = await fetch(production ? SNAP_URL.production : SNAP_URL.sandbox, {
+    const res = await fetch(production ? CORE_CHARGE_URL.production : CORE_CHARGE_URL.sandbox, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -62,18 +65,26 @@ export default {
       },
       body: JSON.stringify(payload),
     });
-    const snap = await res.json().catch(() => null);
-    if (!res.ok || !snap?.redirect_url) {
-      const detail = Array.isArray(snap?.error_messages) ? snap.error_messages.join(', ') : '';
-      return json({ error: `Gagal membuat pembayaran Midtrans. ${detail}`.trim() }, 502);
+    const charge = await res.json().catch(() => null);
+    const qrUrl = extractQrCodeUrl(charge);
+    // Core API dapat membalas HTTP 200 dengan status_code di badan respons.
+    if (!res.ok || !qrUrl || (charge?.status_code && !String(charge.status_code).startsWith('2'))) {
+      const detail = charge?.status_message ?? (Array.isArray(charge?.validation_messages) ? charge.validation_messages.join(', ') : '');
+      return json({ error: `Gagal membuat QRIS Midtrans. ${detail}`.trim() }, 502);
     }
 
-    // Simpan tautan agar customer bisa membuka ulang halaman bayar (proses sistem).
+    // Simpan URL gambar QR (proses sistem) agar layar bayar bisa dibuka ulang.
     await ctx.supabaseAdmin
       .from('orders')
-      .update({ gateway_redirect_url: snap.redirect_url, gateway_status: 'created', gateway_updated_at: new Date().toISOString() })
+      .update({
+        gateway_redirect_url: qrUrl,
+        gateway_status: charge.transaction_status ?? 'pending',
+        gateway_payment_type: charge.payment_type ?? 'qris',
+        gateway_transaction_id: charge.transaction_id ?? null,
+        gateway_updated_at: new Date().toISOString(),
+      })
       .eq('id', orderId);
 
-    return json({ redirect_url: snap.redirect_url, token: snap.token }, 201);
+    return json({ qr_url: qrUrl, due_at: order.payment_due_at }, 201);
   }),
 };

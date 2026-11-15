@@ -1,5 +1,7 @@
 /**
- * PEMBAYARAN QRIS ONLINE (MIDTRANS SNAP) — keputusan 2026-11-14
+ * PEMBAYARAN QRIS ONLINE (MIDTRANS CORE API) — keputusan 2026-11-14
+ * - QR ditampilkan langsung di aplikasi (gambar QR dari Core API /v2/charge), dengan
+ *   nominal & hitung mundur bergaya aplikasi — tanpa halaman Midtrans.
  * - Customer memilih: QRIS online lewat Midtrans, atau bayar di kasir (alur lama, 15 menit).
  * - Batas bayar QRIS online: 3 menit.
  * - Pesanan online baru tampil di kasir setelah lunas; lunas hanya lewat webhook Midtrans
@@ -8,15 +10,16 @@
 import {
   ONLINE_PAYMENT_TIMEOUT_MINUTES,
   basicAuthHeader,
-  buildSnapTransaction,
+  buildQrisCharge,
+  extractQrCodeUrl,
   formatMidtransTime,
   mapMidtransStatus,
   midtransSignatureInput,
 } from '../supabase/functions/_shared/midtrans';
 import {
   CUSTOMER_PAYMENT_OPTIONS,
-  classifyPaymentNavigation,
   getCustomerPaymentOption,
+  isSandboxQrUrl,
   isHiddenFromKasir,
   isOnlineOrder,
 } from '../lib/payment-gateway-logic';
@@ -32,7 +35,7 @@ const MIGRATION = 'supabase/migrations/20261114000005_midtrans_online_payment.sq
 // ---------------------------------------------------------------------------
 // Logika Midtrans (dipakai Edge Function)
 // ---------------------------------------------------------------------------
-describe('Midtrans: transaksi Snap', () => {
+describe('Midtrans: transaksi QRIS (Core API)', () => {
   const order = {
     id: '11111111-1111-1111-1111-111111111111',
     order_number: 'ORD-20261114-0007',
@@ -53,11 +56,12 @@ describe('Midtrans: transaksi Snap', () => {
     expect(formatMidtransTime('2026-11-14T04:00:05Z')).toBe('2026-11-14 11:00:05 +0700');
   });
 
-  it('isi transaksi: QRIS saja, kedaluwarsa 3 menit dari pesanan dibuat, total = jumlah item', () => {
-    const body = buildSnapTransaction(order, items, { email: 'sari@x.id' });
+  it('isi charge: QRIS (GoPay), kedaluwarsa 3 menit dari pesanan dibuat, total = jumlah item', () => {
+    const body = buildQrisCharge(order, items, { email: 'sari@x.id' });
+    expect(body.payment_type).toBe('qris');
+    expect(body.qris).toEqual({ acquirer: 'gopay' });
     expect(body.transaction_details).toEqual({ order_id: order.id, gross_amount: 51000 });
-    expect(body.enabled_payments).toEqual(['other_qris']);
-    expect(body.expiry).toEqual({ start_time: '2026-11-14 11:00:05 +0700', unit: 'minute', duration: 3 });
+    expect(body.custom_expiry).toEqual({ order_time: '2026-11-14 11:00:05 +0700', expiry_duration: 3, unit: 'minute' });
     const sum = body.item_details.reduce((s, i) => s + i.price * i.quantity, 0);
     expect(sum).toBe(51000);
     expect(body.item_details.every((i) => i.name.length <= 50)).toBe(true);
@@ -65,7 +69,20 @@ describe('Midtrans: transaksi Snap', () => {
   });
 
   it('menolak total yang tidak cocok dengan item', () => {
-    expect(() => buildSnapTransaction({ ...order, total_amount: 50000 }, items, {})).toThrow(/tidak sesuai/);
+    expect(() => buildQrisCharge({ ...order, total_amount: 50000 }, items, {})).toThrow(/tidak sesuai/);
+  });
+
+  it('mengambil URL gambar QR dari respons charge', () => {
+    const res = {
+      transaction_id: 't1',
+      actions: [
+        { name: 'generate-qr-code-v2', method: 'GET', url: 'https://api.sandbox.midtrans.com/v2/qris/t1/qr-code-v2' },
+        { name: 'generate-qr-code', method: 'GET', url: 'https://api.sandbox.midtrans.com/v2/qris/t1/qr-code' },
+      ],
+    };
+    expect(extractQrCodeUrl(res)).toBe('https://api.sandbox.midtrans.com/v2/qris/t1/qr-code');
+    expect(extractQrCodeUrl({ actions: [] })).toBeNull();
+    expect(extractQrCodeUrl(null)).toBeNull();
   });
 
   it('header otorisasi Basic dari server key', () => {
@@ -92,20 +109,11 @@ describe('Midtrans: transaksi Snap', () => {
 // ---------------------------------------------------------------------------
 // Logika aplikasi
 // ---------------------------------------------------------------------------
-describe('Navigasi di dalam halaman pembayaran', () => {
-  it('halaman https dimuat di WebView', () => {
-    expect(classifyPaymentNavigation('https://app.sandbox.midtrans.com/snap/v4/redirection/abc#/other-qris')).toBe('load');
-    expect(classifyPaymentNavigation('about:blank')).toBe('load');
-  });
-  it('tautan aplikasi e-wallet dibuka di aplikasinya', () => {
-    expect(classifyPaymentNavigation('gojek://gopay/merchanttransfer?tref=1')).toBe('external');
-    expect(classifyPaymentNavigation('shopeeid://main')).toBe('external');
-    expect(classifyPaymentNavigation('intent://pay#Intent;scheme=gojek;end')).toBe('external');
-  });
-  it('http tanpa enkripsi & skema berbahaya diblokir', () => {
-    expect(classifyPaymentNavigation('http://contoh.com')).toBe('block');
-    expect(classifyPaymentNavigation('javascript:alert(1)')).toBe('block');
-    expect(classifyPaymentNavigation('file:///etc/passwd')).toBe('block');
+describe('Mode uji (sandbox)', () => {
+  it('tautan QR sandbox dikenali untuk tombol bagikan ke simulator', () => {
+    expect(isSandboxQrUrl('https://api.sandbox.midtrans.com/v2/qris/t1/qr-code')).toBe(true);
+    expect(isSandboxQrUrl('https://api.midtrans.com/v2/qris/t1/qr-code')).toBe(false);
+    expect(isSandboxQrUrl(null)).toBe(false);
   });
 });
 
@@ -202,7 +210,7 @@ describe('Edge Function & layar', () => {
   it('create-midtrans-payment: server key dari Secrets, pesanan milik sendiri', () => {
     const src = read('supabase/functions/create-midtrans-payment/index.ts');
     expect(src).toContain("Deno.env.get('MIDTRANS_SERVER_KEY')");
-    expect(src).toContain('buildSnapTransaction(');
+    expect(src).toContain('buildQrisCharge(');
     expect(src).toContain("withSupabase({ auth: 'user' }");
   });
 
@@ -222,22 +230,31 @@ describe('Edge Function & layar', () => {
     }
   });
 
-  it('helper meminta halaman pembayaran lewat Edge Function (tanpa tab browser)', () => {
+  it('helper meminta QR lewat Edge Function lalu membuka layar Bayar QRIS', () => {
     const src = read('lib/online-payment.ts');
     expect(src).toContain("functions.invoke('create-midtrans-payment'");
-    expect(src).not.toContain('expo-web-browser');
     expect(src).toContain("pathname: '/(customer)/payment'");
+    expect(src).toContain('qrUrl');
   });
 
-  it('halaman pembayaran Midtrans tampil di dalam aplikasi (WebView)', () => {
+  it('layar Bayar QRIS: hanya gambar QR + nominal & hitung mundur bergaya aplikasi', () => {
     const src = read('app/(customer)/payment.tsx');
-    expect(src).toContain("from 'react-native-webview'");
-    expect(src).toContain('<WebView');
-    expect(src).toContain('onShouldStartLoadWithRequest');
-    expect(src).toContain('classifyPaymentNavigation(');
-    // status lunas/batal diikuti lewat realtime, bukan dari halaman Midtrans
+    expect(src).not.toContain('react-native-webview');
+    expect(src).toContain('<Image');
+    expect(src).toContain('source={{ uri: qrUrl }}');
+    expect(src).toContain('formatRupiah(');
+    expect(src).toContain('formatCountdown(');
+    // status lunas/batal diikuti lewat realtime
     expect(src).toContain('postgres_changes');
     expect(read('app/(customer)/_layout.tsx')).toContain('name="payment"');
+  });
+
+  it('Edge Function memakai Core API charge & mengembalikan URL QR', () => {
+    const src = read('supabase/functions/create-midtrans-payment/index.ts');
+    expect(src).toContain('buildQrisCharge(');
+    expect(src).toContain('extractQrCodeUrl(');
+    expect(src).toContain('CORE_CHARGE_URL');
+    expect(src).toContain('qr_url');
   });
 
   it('checkout customer memakai pilihan bayar & membuka pembayaran online', () => {

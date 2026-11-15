@@ -1,13 +1,14 @@
-// Logika murni Midtrans Snap, dipakai Edge Function create-midtrans-payment &
+// Logika murni Midtrans (Core API QRIS), dipakai Edge Function create-midtrans-payment &
 // midtrans-webhook (dan diuji Jest). Tanpa import agar berjalan di Deno maupun Node.
-// Referensi: docs.midtrans.com (Snap Integration Guide, Advanced Feature, HTTP Notification).
+// Referensi: docs.midtrans.com (Core API QRIS /v2/charge, Core API Advanced Features
+// custom_expiry, HTTP Notification). QR ditampilkan langsung di aplikasi.
 
 /** Batas bayar QRIS online (keputusan 2026-11-14). Pasangan: public.online_payment_timeout(). */
 export const ONLINE_PAYMENT_TIMEOUT_MINUTES = 3;
 
-export const SNAP_URL = {
-  sandbox: 'https://app.sandbox.midtrans.com/snap/v1/transactions',
-  production: 'https://app.midtrans.com/snap/v1/transactions',
+export const CORE_CHARGE_URL = {
+  sandbox: 'https://api.sandbox.midtrans.com/v2/charge',
+  production: 'https://api.midtrans.com/v2/charge',
 };
 
 export function statusUrl(orderId: string, production: boolean): string {
@@ -41,10 +42,10 @@ export function formatMidtransTime(iso: string): string {
 }
 
 /**
- * Isi permintaan Snap: hanya QRIS, kedaluwarsa 3 menit sejak pesanan dibuat
+ * Isi charge Core API QRIS (acquirer GoPay): kedaluwarsa 3 menit sejak pesanan dibuat
  * (sama dengan payment_due_at di database), total harus sama dengan jumlah item.
  */
-export function buildSnapTransaction(
+export function buildQrisCharge(
   order: SnapOrder,
   items: SnapItem[],
   options: { email?: string | null }
@@ -66,16 +67,25 @@ export function buildSnapTransaction(
   if (options.email) customer.email = options.email;
 
   return {
+    payment_type: 'qris',
     transaction_details: { order_id: order.id, gross_amount: grossAmount },
     item_details: itemDetails,
     customer_details: customer,
-    enabled_payments: ['other_qris'],
-    expiry: {
-      start_time: formatMidtransTime(order.created_at),
+    qris: { acquirer: 'gopay' },
+    custom_expiry: {
+      order_time: formatMidtransTime(order.created_at),
+      expiry_duration: ONLINE_PAYMENT_TIMEOUT_MINUTES,
       unit: 'minute',
-      duration: ONLINE_PAYMENT_TIMEOUT_MINUTES,
     },
   };
+}
+
+/** URL gambar QR (PNG) dari respons charge: actions[name = "generate-qr-code"]. */
+export function extractQrCodeUrl(
+  response: { actions?: { name?: string; url?: string }[] } | null | undefined
+): string | null {
+  const action = response?.actions?.find((a) => a?.name === 'generate-qr-code');
+  return action?.url ?? null;
 }
 
 export function basicAuthHeader(serverKey: string): string {

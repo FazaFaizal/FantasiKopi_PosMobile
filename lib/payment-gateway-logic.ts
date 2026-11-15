@@ -65,16 +65,7 @@ export function isHiddenFromKasir(order: { payment_channel?: string | null; paym
   return isOnlineOrder(order) && order.payment_status === 'Pending';
 }
 
-/**
- * Navigasi di dalam WebView pembayaran:
- * - 'load'     : halaman https (Midtrans) dimuat di dalam aplikasi;
- * - 'external' : tautan aplikasi e-wallet (gojek://, shopeeid://, intent://) dibuka di aplikasinya;
- * - 'block'    : http tanpa enkripsi dan skema lain (javascript:, file:, data:) diblokir.
- */
-export function classifyPaymentNavigation(url: string): 'load' | 'external' | 'block' {
-  const lower = (url || '').trim().toLowerCase();
-  if (lower.startsWith('https://') || lower === 'about:blank') return 'load';
-  if (/^(javascript|file|data|http|about|blob|content):/.test(lower)) return 'block';
-  if (/^[a-z][a-z0-9+.-]*:/.test(lower)) return 'external';
-  return 'block';
+/** Tautan QR dari Midtrans Sandbox (mode uji) — boleh dibagikan ke simulator QRIS. */
+export function isSandboxQrUrl(url: string | null | undefined): boolean {
+  return !!url && url.startsWith('https://api.sandbox.midtrans.com/');
 }

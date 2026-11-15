@@ -767,7 +767,7 @@ Pembayaran Customer di kasir:
 Pembayaran QRIS Online (payment gateway Midtrans Snap):
 
 1. Saat checkout, Customer memilih **QRIS Online** atau bayar di kasir (Tunai / QRIS di kasir / Debit).
-2. Untuk QRIS Online, order dibuat dengan Payment Status Pending, lalu aplikasi menampilkan halaman pembayaran Midtrans (hanya QRIS) **di dalam aplikasi** pada layar "Bayar QRIS", lengkap dengan total dan hitung mundur. Batas bayar **3 menit**. Layar otomatis berganti menjadi "Pembayaran Berhasil" begitu order lunas, atau "Batas Waktu Habis" bila kedaluwarsa.
+2. Untuk QRIS Online, order dibuat dengan Payment Status Pending, lalu server membuat transaksi QRIS di Midtrans (Core API) dan aplikasi menampilkan **gambar QR** pada layar "Bayar QRIS" milik aplikasi, lengkap dengan total pembayaran, hitung mundur, dan petunjuk membayar. Batas bayar **3 menit**. Layar otomatis berganti menjadi "Pembayaran Berhasil" begitu order lunas, atau "Batas Waktu Habis" bila kedaluwarsa.
 3. Setelah Customer membayar, Midtrans mengirim notifikasi ke server (webhook). Server memverifikasi tanda tangan notifikasi dan memeriksa ulang status ke Midtrans, lalu menandai order **Paid** dan **Processing**.
 4. Order QRIS Online **tidak tampil di kasir sebelum lunas**. Setelah lunas, kasir mendapat notifikasi "Pesanan online lunas" dan langsung menyiapkan pesanan.
 5. Bila QR tidak dibayar sampai batas waktu, order dibatalkan otomatis (Payment Status Failed). Customer tidak dapat membatalkan order QRIS Online secara manual, untuk mencegah order dibatalkan tetapi QR tetap dibayar.
