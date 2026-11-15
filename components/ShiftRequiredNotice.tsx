@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from './Button';
 import { LoadingState } from './States';
@@ -28,9 +28,13 @@ export function ShiftRequiredNotice({ loading, onOpenCash, onRetry }: ShiftRequi
         onPress={onOpenCash}
         icon={<Ionicons name="lock-open-outline" size={16} color="#FFFFFF" />}
       />
-      <Text accessibilityRole="button" onPress={onRetry} className="font-body-medium text-primary text-xs mt-4 p-2">
-        Sudah dibuka? Periksa ulang
-      </Text>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={onRetry}
+        className="mt-3 min-h-11 px-4 items-center justify-center"
+      >
+        <Text className="font-body-medium text-primary text-sm">Sudah dibuka? Periksa ulang</Text>
+      </TouchableOpacity>
     </View>
   );
 }

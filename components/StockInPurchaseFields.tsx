@@ -51,7 +51,7 @@ export function StockInPurchaseFields({
         />
         <View className="ml-2 flex-1">
           <Text className="font-body-medium text-text text-sm">Ini pembelian, catat sebagai biaya</Text>
-          <Text className="font-body text-muted text-[11px]">
+          <Text className="font-body text-muted text-xs">
             Masuk ke Expense hari ini (Raw Material). Kosongkan jika bukan pembelian.
           </Text>
         </View>
@@ -69,10 +69,10 @@ export function StockInPurchaseFields({
             leftIcon={<Ionicons name="cash-outline" size={18} color="#6B7280" />}
           />
           <View className="bg-background border border-line rounded-card p-3 mb-2">
-            <Text className="font-body text-muted text-[11px]">Akan dicatat sebagai expense:</Text>
+            <Text className="font-body text-muted text-xs">Akan dicatat sebagai expense:</Text>
             <Text className="font-body-medium text-text text-xs mt-0.5">{previewDescription}</Text>
             <Text className="font-heading-semibold text-primary text-sm mt-0.5">
-              {amount > 0 ? formatRupiah(amount) : 'Rp —'}
+              {amount > 0 ? formatRupiah(amount) : 'Belum diisi'}
             </Text>
           </View>
         </>

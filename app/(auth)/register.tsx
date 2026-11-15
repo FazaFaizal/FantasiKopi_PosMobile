@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, Alert, KeyboardAvoidingView, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { Link, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { validatePassword } from '../../lib/auth-logic';
+import { validatePassword, PASSWORD_MIN_LENGTH } from '../../lib/auth-logic';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -102,13 +102,13 @@ export default function RegisterScreen() {
       edges={['top', 'bottom', 'left', 'right']}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
         style={{ flex: 1 }}
       >
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
-            paddingHorizontal: 20,
+            paddingHorizontal: 16,
             paddingVertical: 24,
           }}
           keyboardShouldPersistTaps="handled"
@@ -128,7 +128,7 @@ export default function RegisterScreen() {
           >
             {/* Brand Header */}
             <View className="items-center mb-6">
-              <View className="w-14 h-14 rounded-card bg-primary items-center justify-center mb-2 shadow-sm">
+              <View className="w-14 h-14 rounded-card bg-primary items-center justify-center mb-2">
                 <Ionicons name="cafe" size={26} color="#FFFFFF" />
               </View>
               <Text className="font-heading text-primary text-2xl text-center">Daftar Akun Baru</Text>
@@ -138,10 +138,10 @@ export default function RegisterScreen() {
             </View>
 
             {/* Form Card */}
-            <View className="bg-surface rounded-card p-6 border border-line shadow-sm">
+            <View className="bg-surface rounded-card p-5 border border-line">
               <Input
                 label="Nama Lengkap"
-                placeholder="Contoh: Rian Pratama"
+                placeholder="Nama lengkap Anda"
                 value={name}
                 onChangeText={(text) => {
                   setName(text);
@@ -168,7 +168,7 @@ export default function RegisterScreen() {
 
               <Input
                 label="Password"
-                placeholder="Minimal 6 karakter"
+                placeholder={`Minimal ${PASSWORD_MIN_LENGTH} karakter`}
                 value={password}
                 onChangeText={(text) => {
                   setPassword(text);
@@ -181,7 +181,7 @@ export default function RegisterScreen() {
 
               <Input
                 label="Konfirmasi Password"
-                placeholder="Ulangi password di atas"
+                placeholder="Ulangi password"
                 value={confirmPassword}
                 onChangeText={(text) => {
                   setConfirmPassword(text);

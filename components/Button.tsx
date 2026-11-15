@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, TouchableOpacityProps, View } from 'react-native';
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success';
 type Size = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends TouchableOpacityProps {
@@ -13,15 +13,16 @@ interface ButtonProps extends TouchableOpacityProps {
 }
 
 const STYLES: Record<Variant, { box: string; text: string; spinner: string }> = {
-  primary: { box: 'bg-primary shadow-sm active:bg-primary-dark', text: 'text-white', spinner: '#FFFFFF' },
-  secondary: { box: 'bg-secondary shadow-sm active:bg-secondary-dark', text: 'text-text', spinner: '#1F2937' },
+  primary: { box: 'bg-primary active:bg-primary-dark', text: 'text-white', spinner: '#FFFFFF' },
+  secondary: { box: 'bg-secondary active:bg-secondary-dark', text: 'text-text', spinner: '#1F2937' },
   outline: { box: 'bg-transparent border border-primary active:bg-primary/5', text: 'text-primary', spinner: '#D1001F' },
   ghost: { box: 'bg-transparent active:bg-black/5', text: 'text-primary', spinner: '#D1001F' },
-  danger: { box: 'bg-danger shadow-sm active:bg-red-900', text: 'text-white', spinner: '#FFFFFF' },
+  danger: { box: 'bg-danger active:bg-primary-dark', text: 'text-white', spinner: '#FFFFFF' },
+  success: { box: 'bg-success active:opacity-90', text: 'text-white', spinner: '#FFFFFF' },
 };
 
 const SIZES: Record<Size, { container: string; text: string }> = {
-  sm: { container: 'min-h-10 px-3.5 py-1.5', text: 'text-xs' },
+  sm: { container: 'min-h-11 px-3.5 py-1.5', text: 'text-xs' },
   md: { container: 'min-h-12 px-5 py-2.5', text: 'text-sm' },
   lg: { container: 'min-h-14 px-6 py-3.5', text: 'text-base' },
 };

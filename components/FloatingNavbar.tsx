@@ -1,196 +1,14 @@
-import React, { useState } from "react";
-import { View, TouchableOpacity, Platform } from "react-native";
-import House from "lucide-react-native/icons/house";
-import Send from "lucide-react-native/icons/send";
-import Plus from "lucide-react-native/icons/plus";
-import Heart from "lucide-react-native/icons/heart";
-import User from "lucide-react-native/icons/user";
-import Coffee from "lucide-react-native/icons/coffee";
-import Layers from "lucide-react-native/icons/layers";
-import Package from "lucide-react-native/icons/package";
-import Users from "lucide-react-native/icons/users";
-import Receipt from "lucide-react-native/icons/receipt";
-import LayoutDashboard from "lucide-react-native/icons/layout-dashboard";
-import type { LucideIcon } from "lucide-react-native";
-import { Tabs } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React from "react";
+import { View, Text, TouchableOpacity, Platform } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
-const Home = House;
+type IoniconName = keyof typeof Ionicons.glyphMap;
 
-export type BottomTabBarProps = Parameters<
-  NonNullable<React.ComponentProps<typeof Tabs>["tabBar"]>
->[0];
-
-export interface TabItem {
-  id: string;
-  label?: string;
-  icon: LucideIcon;
-  fillActive?: boolean;
-}
-
-export type NavbarVariant = "light" | "coffee-dark";
-
-interface NavbarThemeConfig {
-  containerClass: string;
-  activeBtnClass: string;
-  activeIconColor: string;
-  inactiveIconColor: string;
-  containerStyle: {
-    shadowColor: string;
-    shadowOffset: { width: number; height: number };
-    shadowOpacity: number;
-    shadowRadius: number;
-    elevation: number;
-  };
-}
-
-const THEMES: Record<NavbarVariant, NavbarThemeConfig> = {
-  light: {
-    containerClass: "bg-surface border border-line",
-    activeBtnClass: "bg-primary",
-    activeIconColor: "#FFFFFF",
-    inactiveIconColor: "#6B7280",
-    containerStyle: {
-      shadowColor: "#000000",
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.1,
-      shadowRadius: 14,
-      elevation: 8,
-    },
-  },
-  "coffee-dark": {
-    containerClass: "bg-[#1E1113] border border-[#3D2024]",
-    activeBtnClass: "bg-primary",
-    activeIconColor: "#FFFFFF",
-    inactiveIconColor: "#A8A29E",
-    containerStyle: {
-      shadowColor: "#000000",
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: 0.35,
-      shadowRadius: 16,
-      elevation: 10,
-    },
-  },
-};
-
-const DEFAULT_DEMO_TABS: TabItem[] = [
-  { id: "home", label: "Home", icon: Home, fillActive: true },
-  { id: "send", label: "Send", icon: Send },
-  { id: "add", label: "Add", icon: Plus },
-  { id: "heart", label: "Heart", icon: Heart },
-  { id: "user", label: "User", icon: User },
-];
-
-interface FloatingNavbarProps {
-  activeTab?: string;
-  onTabChange?: (tabId: string) => void;
-  tabs?: TabItem[];
-  className?: string;
-  variant?: NavbarVariant;
-}
-
-/**
- * Standalone Floating Navbar Component (Pill Design)
- * Matches Fantasi Coffee POS design system & color palette
- */
-export default function FloatingNavbar({
-  activeTab: controlledActiveTab,
-  onTabChange,
-  tabs = DEFAULT_DEMO_TABS,
-  className = "",
-  variant = "light",
-}: FloatingNavbarProps) {
-  const [internalActiveTab, setInternalActiveTab] = useState("home");
-  const insets = useSafeAreaInsets();
-  const theme = THEMES[variant];
-
-  const currentTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
-
-  const handlePress = (tabId: string) => {
-    if (controlledActiveTab === undefined) {
-      setInternalActiveTab(tabId);
-    }
-    onTabChange?.(tabId);
-  };
-
-  const bottomOffset = Platform.OS === "ios" ? Math.max(insets.bottom, 16) : 20;
-
-  return (
-    <View
-      style={{
-        position: "absolute",
-        bottom: bottomOffset,
-        left: 0,
-        right: 0,
-        alignItems: "center",
-        zIndex: 50,
-      }}
-      className={className}
-    >
-      {/* Main Navbar Container */}
-      <View
-        style={[
-          {
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-            borderRadius: 9999,
-            paddingHorizontal: 8,
-            paddingVertical: 6,
-            maxWidth: 420,
-            width: "92%",
-            backgroundColor: variant === "coffee-dark" ? "#1E1113" : "#FFFFFF",
-            borderWidth: 1,
-            borderColor: variant === "coffee-dark" ? "#3D2024" : "#E5E7EB",
-          },
-          theme.containerStyle,
-        ]}
-        className={theme.containerClass}
-      >
-        {tabs.map((tab) => {
-          const isActive = currentTab === tab.id;
-          const IconComponent = tab.icon;
-
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              accessibilityRole="button"
-              accessibilityLabel={tab.label || tab.id}
-              accessibilityState={{ selected: isActive }}
-              onPress={() => handlePress(tab.id)}
-              activeOpacity={0.7}
-              style={{
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 9999,
-                backgroundColor: isActive ? "#D1001F" : "transparent",
-                paddingHorizontal: isActive ? 22 : 12,
-                paddingVertical: 10,
-              }}
-              className={isActive ? `${theme.activeBtnClass} rounded-full` : "rounded-full"}
-            >
-              <IconComponent
-                color={isActive ? theme.activeIconColor : theme.inactiveIconColor}
-                size={tab.id === "add" ? 24 : 22}
-                fill={isActive && tab.fillActive ? theme.activeIconColor : "transparent"}
-              />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-// Icon dictionary for Expo Router routes
-const ROUTE_ICONS: Record<string, { icon: LucideIcon; fillActive?: boolean }> = {
-  dashboard: { icon: LayoutDashboard, fillActive: false },
-  pos: { icon: Receipt, fillActive: false },
-  product: { icon: Coffee, fillActive: false },
-  category: { icon: Layers, fillActive: false },
-  inventory: { icon: Package, fillActive: false },
-  employee: { icon: Users, fillActive: false },
-  home: { icon: Home, fillActive: true },
+/** Ikon cadangan bila layar tidak menyediakan tabBarIcon sendiri. */
+const ROUTE_ICONS: Record<string, IoniconName> = {
+  dashboard: "grid-outline",
+  product: "cafe-outline",
+  inventory: "cube-outline",
 };
 
 export interface FloatingTabBarProps {
@@ -200,40 +18,27 @@ export interface FloatingTabBarProps {
   emitter?: any;
   navigateToTab?: (routeKey: string) => void;
   insets?: { top?: number; right?: number; bottom?: number; left?: number };
-  variant?: NavbarVariant;
 }
 
 /**
- * Custom TabBar implementation for Expo Router `<Tabs tabBar={...} />`
- * Perfectly aligned horizontal floating pill capsule matching Fantasi Coffee POS
+ * Tab bar mengambang untuk `<Tabs tabBar={...} />` di area Admin.
+ * Setiap item menampilkan ikon + label teks agar tujuan terbaca tanpa menebak ikon.
  */
-export function FloatingTabBar({
-  state,
-  descriptors,
-  navigation,
-  emitter,
-  navigateToTab,
-  insets,
-  variant = "light",
-}: FloatingTabBarProps) {
+export function FloatingTabBar({ state, descriptors, navigation, emitter, navigateToTab, insets }: FloatingTabBarProps) {
   const currentRoute = state.routes[state.index];
-  const currentDescriptor = descriptors[currentRoute?.key];
-  const currentOptions = (currentDescriptor?.options || {}) as Record<string, unknown> & {
+  const currentOptions = (descriptors[currentRoute?.key]?.options || {}) as {
     tabBarStyle?: { display?: string };
   };
 
-  // Sembunyikan tab bar secara menyeluruh jika layar saat ini mengonfigurasi tabBarStyle display none
+  // Layar yang mengatur tabBarStyle display none tidak menampilkan tab bar sama sekali.
   if (currentOptions.tabBarStyle?.display === "none") {
     return null;
   }
 
-  const bottomOffset = Platform.OS === "ios" ? Math.max(insets?.bottom ?? 0, 16) : 20;
-  const isDark = variant === "coffee-dark";
+  const bottomOffset = Platform.OS === "ios" ? Math.max(insets?.bottom ?? 0, 16) : 16;
 
-  // Filter out screens with href: null or display: none (hidden tabs)
   const visibleRoutes = state.routes.filter((route: any) => {
-    const descriptor = descriptors[route.key];
-    const options = (descriptor?.options || {}) as Record<string, unknown> & {
+    const options = (descriptors[route.key]?.options || {}) as {
       href?: string | null;
       tabBarItemStyle?: { display?: string };
     };
@@ -242,229 +47,69 @@ export function FloatingTabBar({
     return true;
   });
 
-  const isFewTabs = visibleRoutes.length <= 3;
-  const activeIconColor = "#FFFFFF";
-  const inactiveIconColor = isDark ? "#A8A29E" : "#6B7280";
-
   return (
     <View
-      style={{
-        position: "absolute",
-        bottom: bottomOffset,
-        left: 0,
-        right: 0,
-        alignItems: "center",
-        zIndex: 50,
-      }}
+      style={{ position: "absolute", bottom: bottomOffset, left: 0, right: 0, alignItems: "center", zIndex: 50 }}
+      pointerEvents="box-none"
     >
       <View
+        className="bg-surface border border-line flex-row items-center p-1.5"
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: isFewTabs ? "space-around" : "space-between",
-          borderRadius: 9999,
-          paddingHorizontal: 8,
-          paddingVertical: 6,
-          width: isFewTabs ? 240 : "92%",
-          maxWidth: isFewTabs ? 260 : 420,
-          backgroundColor: isDark ? "#1E1113" : "#FFFFFF",
-          borderWidth: 1,
-          borderColor: isDark ? "#3D2024" : "#E5E7EB",
+          borderRadius: 20,
+          width: "92%",
+          maxWidth: 420,
           shadowColor: "#000000",
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.1,
           shadowRadius: 14,
           elevation: 8,
         }}
-        className={isDark ? "bg-[#1E1113] border border-[#3D2024]" : "bg-surface border border-line"}
       >
         {visibleRoutes.map((route: any) => {
-          const isFocused = state.routes[state.index].key === route.key;
-          const descriptor = descriptors[route.key];
-          const options = (descriptor?.options || {}) as Record<string, unknown> & {
+          const isFocused = currentRoute.key === route.key;
+          const options = (descriptors[route.key]?.options || {}) as {
             tabBarIcon?: (props: { focused: boolean; color: string; size: number }) => React.ReactNode;
             title?: string;
           };
-          const iconMeta = ROUTE_ICONS[route.name] || { icon: Home, fillActive: false };
-          const IconComponent = iconMeta.icon;
+          const label = options.title || route.name;
+          const color = isFocused ? "#FFFFFF" : "#4B5563";
 
           const onPress = () => {
-            const event = emitter
-              ? emitter.emit({
-                  type: "tabPress",
-                  target: route.key,
-                  canPreventDefault: true,
-                })
-              : navigation?.emit
-              ? navigation.emit({
-                  type: "tabPress",
-                  target: route.key,
-                  canPreventDefault: true,
-                })
-              : null;
-
+            const emit = emitter?.emit ?? navigation?.emit;
+            const event = emit ? emit({ type: "tabPress", target: route.key, canPreventDefault: true }) : null;
             if (!isFocused && !event?.defaultPrevented) {
-              if (navigateToTab) {
-                navigateToTab(route.key);
-              } else if (navigation?.navigate) {
-                navigation.navigate(route.name);
-              }
+              if (navigateToTab) navigateToTab(route.key);
+              else navigation?.navigate?.(route.name);
             }
           };
-
-          const iconColor = isFocused ? activeIconColor : inactiveIconColor;
 
           return (
             <TouchableOpacity
               key={route.key}
-              accessibilityRole="button"
-              accessibilityLabel={options.title || route.name}
+              accessibilityRole="tab"
+              accessibilityLabel={label}
               accessibilityState={{ selected: isFocused }}
               onPress={onPress}
               activeOpacity={0.7}
-              style={{
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 9999,
-                backgroundColor: isFocused ? "#D1001F" : "transparent",
-                paddingHorizontal: isFocused
-                  ? isFewTabs
-                    ? 28
-                    : 20
-                  : isFewTabs
-                  ? 18
-                  : 12,
-                paddingVertical: 10,
-              }}
-              className={isFocused ? "bg-primary rounded-full" : "rounded-full"}
+              className={`flex-1 min-h-12 items-center justify-center rounded-chip py-1.5 ${
+                isFocused ? "bg-primary" : "bg-transparent"
+              }`}
             >
               {typeof options.tabBarIcon === "function" ? (
-                options.tabBarIcon({
-                  focused: isFocused,
-                  color: iconColor,
-                  size: 22,
-                })
+                options.tabBarIcon({ focused: isFocused, color, size: 20 })
               ) : (
-                <IconComponent
-                  color={iconColor}
-                  size={22}
-                  fill={isFocused && iconMeta.fillActive ? activeIconColor : "transparent"}
-                />
+                <Ionicons name={ROUTE_ICONS[route.name] ?? "ellipse-outline"} size={20} color={color} />
               )}
+              <Text
+                numberOfLines={1}
+                className={`text-xs mt-0.5 ${isFocused ? "font-heading-semibold text-white" : "font-body-medium text-text"}`}
+              >
+                {label}
+              </Text>
             </TouchableOpacity>
           );
         })}
       </View>
     </View>
   );
-}
-
-export interface FloatingTabIconProps {
-  icon: LucideIcon;
-  focused: boolean;
-  color?: string;
-  size?: number;
-  fillActive?: boolean;
-  isCompact?: boolean;
-}
-
-/**
- * Capsule Pill Tab Icon Component for Expo Router Tabs
- * Renders an active pill capsule (#D1001F) without sharp rectangular cell borders
- */
-export function FloatingTabIcon({
-  icon: Icon,
-  focused,
-  color,
-  size = 22,
-  fillActive = false,
-  isCompact = false,
-}: FloatingTabIconProps) {
-  if (focused) {
-    return (
-      <View
-        className={`items-center justify-center rounded-full bg-primary flex-row ${
-          isCompact ? "px-7 py-2.5" : "px-5 py-2.5"
-        }`}
-        style={{
-          borderRadius: 9999,
-          backgroundColor: "#D1001F",
-          shadowColor: "#D1001F",
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.25,
-          shadowRadius: 8,
-          elevation: 4,
-        }}
-      >
-        <Icon
-          size={size}
-          color="#FFFFFF"
-          fill={fillActive ? "#FFFFFF" : "transparent"}
-        />
-      </View>
-    );
-  }
-
-  return (
-    <View
-      className={`items-center justify-center rounded-full ${
-        isCompact ? "px-4 py-2.5" : "px-3 py-2.5"
-      }`}
-    >
-      <Icon
-        size={size}
-        color={color || "#6B7280"}
-        fill="transparent"
-      />
-    </View>
-  );
-}
-
-export interface FloatingTabOptionsConfig {
-  variant?: NavbarVariant;
-  isCompact?: boolean;
-}
-
-/**
- * Standard Expo Router Bottom Tabs screenOptions generator for Floating Navbar.
- * Uses official React Navigation tabBarStyle without external navigation context errors.
- */
-export function getFloatingTabScreenOptions(config?: FloatingTabOptionsConfig) {
-  const isDark = config?.variant === "coffee-dark";
-  const isCompact = config?.isCompact ?? false;
-
-  return {
-    headerShown: false,
-    tabBarShowLabel: false,
-    tabBarActiveTintColor: "#FFFFFF",
-    tabBarInactiveTintColor: isDark ? "#A8A29E" : "#6B7280",
-    tabBarStyle: {
-      position: "absolute" as const,
-      bottom: Platform.OS === "ios" ? 28 : 20,
-      left: isCompact ? 60 : 20,
-      right: isCompact ? 60 : 20,
-      height: 64,
-      backgroundColor: isDark ? "#1E1113" : "#FFFFFF",
-      borderRadius: 9999,
-      borderWidth: 1,
-      borderColor: isDark ? "#3D2024" : "#E5E7EB",
-      borderTopWidth: 0,
-      elevation: 8,
-      shadowColor: isDark ? "#000000" : "#1F2937",
-      shadowOffset: { width: 0, height: 6 },
-      shadowOpacity: isDark ? 0.35 : 0.12,
-      shadowRadius: 16,
-      paddingHorizontal: 8,
-      paddingBottom: 0,
-      alignItems: "center" as const,
-      justifyContent: "space-around" as const,
-    },
-    tabBarItemStyle: {
-      height: 64,
-      justifyContent: "center" as const,
-      alignItems: "center" as const,
-      padding: 0,
-      margin: 0,
-    },
-  };
 }

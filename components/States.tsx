@@ -57,9 +57,11 @@ export function EmptyState({
 interface ErrorStateProps {
   message: string;
   onRetry: () => void;
+  /** Label tombol aksi; ganti jika aksinya bukan memuat ulang (mis. pindah halaman). */
+  actionLabel?: string;
 }
 
-export function ErrorState({ message, onRetry }: ErrorStateProps) {
+export function ErrorState({ message, onRetry, actionLabel }: ErrorStateProps) {
   return (
     <View
       className="items-center justify-center py-12 px-6 bg-surface rounded-card border border-line my-3"
@@ -75,9 +77,9 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
         {message}
       </Text>
       <Button
-        title="Coba Memuat Lagi"
+        title={actionLabel ?? "Coba Memuat Lagi"}
         variant="outline"
-        icon={<Ionicons name="refresh-outline" size={16} color="#D1001F" />}
+        icon={actionLabel ? undefined : <Ionicons name="refresh-outline" size={16} color="#D1001F" />}
         onPress={onRetry}
         className="mt-5 self-center min-h-11"
       />

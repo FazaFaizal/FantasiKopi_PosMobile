@@ -26,9 +26,9 @@ export default function UnauthorizedScreen() {
 
   return (
     <View className="flex-1 justify-center items-center px-6 bg-background">
-      <View className="w-full max-w-sm bg-surface rounded-card p-6 border border-line shadow-sm items-center">
+      <View className="w-full max-w-sm bg-surface rounded-card p-6 border border-line items-center">
         {/* Shield Icon */}
-        <View className="w-18 h-18 rounded-full bg-primary/10 items-center justify-center mb-4 border border-primary/20">
+        <View className="w-[72px] h-[72px] rounded-full bg-primary/10 items-center justify-center mb-4 border border-primary/20">
           <Ionicons name="shield-outline" size={40} color="#D1001F" />
         </View>
 

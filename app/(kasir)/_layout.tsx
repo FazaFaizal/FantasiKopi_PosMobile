@@ -17,11 +17,21 @@ export default function KasirLayout() {
   // Pesanan customer yang menunggu dibayar: banner realtime + badge menu Riwayat Pesanan.
   const awaiting = useAwaitingCustomerOrders(!!user);
 
+  const openOrder = (orderId?: string) => {
+    router.replace(
+      (orderId
+        ? { pathname: "/(kasir)/orders", params: { openOrderId: orderId } }
+        : "/(kasir)/orders") as never
+    );
+  };
+
   return (
     <KasirSidebarContext.Provider
       value={{
         openSidebar: () => setSidebarOpen(true),
         closeSidebar: () => setSidebarOpen(false),
+        incoming: awaiting.incoming,
+        openOrder,
       }}
     >
       <Tabs
@@ -79,7 +89,7 @@ export default function KasirLayout() {
       <IncomingOrderBanner
         order={awaiting.latest}
         onDismiss={awaiting.dismissLatest}
-        onOpen={() => router.replace("/(kasir)/orders" as never)}
+        onOpen={() => openOrder(awaiting.latest?.id)}
       />
     </KasirSidebarContext.Provider>
   );

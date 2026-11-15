@@ -8,13 +8,13 @@ import {
   Alert,
   RefreshControl,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { ScreenHeader } from './ScreenHeader';
 import { Button } from './Button';
+import { useSheetBottomPadding } from '../hooks/useSheetPadding';
 import { Input } from './Input';
 import { Badge } from './Badge';
 import { LoadingState, ErrorState } from './States';
@@ -92,6 +92,7 @@ const toAmountText = (n: number) => new Intl.NumberFormat('id-ID').format(n);
  * buka/tutup sif, kas seharusnya di laci untuk sif aktif, ringkasan penjualan & pengeluaran hari ini.
  */
 export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
+  const sheetPadBottom = useSheetBottomPadding(20);
   const { user } = useAuth();
   const { isTablet } = useResponsive();
   const isAdmin = user?.role === 'Admin';
@@ -304,7 +305,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
   const userCanClose = shift ? canCloseShift(shift, user ? { id: user.id, role: user.role } : null) : false;
 
   const diffText = (d: number) => (d === 0 ? 'Cocok ✓' : d > 0 ? `Lebih ${formatRupiah(d)}` : `Kurang ${formatRupiah(-d)}`);
-  const diffClass = (d: number) => (d === 0 ? 'text-emerald-700' : d > 0 ? 'text-amber-700' : 'text-rose-700');
+  const diffClass = (d: number) => (d === 0 ? 'text-success' : d > 0 ? 'text-warning' : 'text-danger');
 
   return (
     <View className="flex-1 bg-background">
@@ -335,11 +336,11 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
               <View className="flex-row items-center justify-between">
                 <Text className="font-body text-white/80 text-xs">Kas seharusnya di laci (sif aktif)</Text>
                 <View className="bg-white/20 px-2 py-0.5 rounded-chip">
-                  <Text className="font-heading-semibold text-white text-[10px]">SIF AKTIF</Text>
+                  <Text className="font-heading-semibold text-white text-xs">SIF AKTIF</Text>
                 </View>
               </View>
-              <Text className="font-heading-bold text-white text-3xl mt-1">{formatRupiah(Number(shift.expected_cash))}</Text>
-              <Text className="font-body text-white/80 text-[11px] mt-1">
+              <Text className="font-heading text-white text-3xl mt-1">{formatRupiah(Number(shift.expected_cash))}</Text>
+              <Text className="font-body text-white/80 text-xs mt-1">
                 Dibuka {formatTime(shift.opened_at)} oleh {shift.opened_by_name || 'staf'}
               </Text>
 
@@ -357,7 +358,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
                     </Text>
                   </View>
                 ))}
-                <Text className="font-body text-white/70 text-[10px] mt-1">
+                <Text className="font-body text-white/70 text-xs mt-1">
                   Non-tunai sif ini: QRIS {formatRupiah(Number(shift.qris_in))} · Debit{' '}
                   {formatRupiah(Number(shift.debit_in ?? 0))} (tidak masuk laci) · {shift.paid_order_count} pembayaran
                 </Text>
@@ -374,7 +375,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
                   <Text className="font-heading-semibold text-primary text-sm ml-1.5">Tutup Sif & Hitung Kas</Text>
                 </TouchableOpacity>
               ) : (
-                <Text className="font-body text-white/80 text-[11px] mt-3">
+                <Text className="font-body text-white/80 text-xs mt-3">
                   Sif ini hanya dapat ditutup oleh kasir yang membukanya atau Admin.
                 </Text>
               )}
@@ -416,18 +417,18 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
               <View key={c.label} className="bg-surface border border-line rounded-card p-3 mb-2.5" style={{ width: '48.5%' }}>
                 <View className="flex-row items-center mb-1">
                   <Ionicons name={c.icon} size={14} color="#6B7280" />
-                  <Text className="font-body text-muted text-[11px] ml-1">{c.label}</Text>
+                  <Text className="font-body text-muted text-xs ml-1">{c.label}</Text>
                 </View>
                 <Text className="font-heading-semibold text-text text-base">{formatRupiah(c.value)}</Text>
-                <Text className="font-body text-muted text-[10px] mt-0.5">{c.note}</Text>
+                <Text className="font-body text-muted text-xs mt-0.5">{c.note}</Text>
               </View>
             ))}
           </View>
 
           {recap.awaitingPaymentCount > 0 && (
-            <View className="flex-row items-center bg-amber-50 border border-amber-200 rounded-card p-3 mb-3">
+            <View className="flex-row items-center bg-warning-soft border border-warning/30 rounded-card p-3 mb-3">
               <Ionicons name="time-outline" size={16} color="#B45309" />
-              <Text className="font-body text-amber-800 text-xs ml-2 flex-1">
+              <Text className="font-body text-warning text-xs ml-2 flex-1">
                 {recap.awaitingPaymentCount} pesanan hari ini belum dibayar dan belum masuk kas.
               </Text>
             </View>
@@ -440,7 +441,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
               accessibilityRole="button"
               accessibilityLabel="Catat pengeluaran harian"
               onPress={startExpense}
-              className={`flex-row items-center px-3 py-2 rounded-chip min-h-11 ${shift || isAdmin ? 'bg-primary' : 'bg-slate-300'}`}
+              className={`flex-row items-center px-3 py-2 rounded-chip min-h-11 ${shift || isAdmin ? 'bg-primary' : 'bg-line'}`}
             >
               <Ionicons name="add" size={16} color="#FFFFFF" />
               <Text className="font-heading-semibold text-white text-xs ml-1">Catat Pengeluaran</Text>
@@ -449,7 +450,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
 
           {expenses.length === 0 ? (
             <View className="bg-surface border border-line rounded-card p-4 items-center mb-3">
-              <Ionicons name="receipt-outline" size={22} color="#9CA3AF" />
+              <Ionicons name="receipt-outline" size={22} color="#6B7280" />
               <Text className="font-body text-muted text-xs mt-1">Belum ada pengeluaran hari ini.</Text>
             </View>
           ) : (
@@ -463,7 +464,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
                     </Text>
                     <View className="flex-row items-center mt-1 flex-wrap gap-1.5">
                       <Badge label={meta.label} tone={meta.tone} />
-                      <Text className="font-body text-muted text-[10px]">
+                      <Text className="font-body text-muted text-xs">
                         {exp.paid_from_cash ? 'Dari kas laci' : 'Sumber lain'}
                         {exp.stock_movement_id ? ' · dari Stock In' : ''}
                       </Text>
@@ -491,21 +492,21 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
                           <Text className="font-body-medium text-text text-xs">
                             {formatTime(s.opened_at)} – {formatTime(s.closed_at)}
                           </Text>
-                          <Text className="font-body text-muted text-[11px]">
+                          <Text className="font-body text-muted text-xs">
                             Dibuka {s.opened_by_name || '-'} · ditutup {s.closed_by_name || '-'}
                           </Text>
                         </View>
                         <Text className={`font-heading-semibold text-xs ${diffClass(diff)}`}>{diffText(diff)}</Text>
                       </View>
-                      <Text className="font-body text-muted text-[11px] mt-1">
+                      <Text className="font-body text-muted text-xs mt-1">
                         Modal {formatRupiah(Number(s.opening_cash))} · seharusnya {formatRupiah(Number(s.expected_cash))} · dihitung{' '}
                         {formatRupiah(Number(s.counted_cash))} · disetor {formatRupiah(Number(s.cash_withdrawn))}
                       </Text>
                       {s.opening_note ? (
-                        <Text className="font-body text-muted text-[11px] italic mt-0.5">Catatan buka: {s.opening_note}</Text>
+                        <Text className="font-body text-muted text-xs italic mt-0.5">Catatan buka: {s.opening_note}</Text>
                       ) : null}
                       {s.closing_note ? (
-                        <Text className="font-body text-muted text-[11px] italic mt-0.5">Catatan tutup: {s.closing_note}</Text>
+                        <Text className="font-body text-muted text-xs italic mt-0.5">Catatan tutup: {s.closing_note}</Text>
                       ) : null}
                     </View>
                   );
@@ -518,8 +519,8 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
 
       {/* ================= MODAL BUKA SIF ================= */}
       <Modal visible={openModal} transparent animationType="slide" onRequestClose={() => setOpenModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 bg-black/60 justify-end">
-          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%' }}>
+        <KeyboardAvoidingView behavior="padding" className="flex-1 bg-black/60 justify-end">
+          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%', paddingBottom: sheetPadBottom }}>
             <Text className="font-heading text-text text-lg">Buka Sif</Text>
             <Text className="font-body text-muted text-xs mb-4">
               Hitung uang di laci sebelum mulai melayani.
@@ -539,7 +540,7 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
                 leftIcon={<Ionicons name="cash-outline" size={18} color="#6B7280" />}
               />
               {openingDiffers && (
-                <Text className="font-body text-amber-700 text-xs -mt-2 mb-3">
+                <Text className="font-body text-warning text-xs -mt-2 mb-3">
                   Berbeda dari sisa kas sif sebelumnya. Isi catatan penyebabnya.
                 </Text>
               )}
@@ -564,8 +565,8 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
 
       {/* ================= MODAL TUTUP SIF ================= */}
       <Modal visible={closeModal} transparent animationType="slide" onRequestClose={() => setCloseModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 bg-black/60 justify-end">
-          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%' }}>
+        <KeyboardAvoidingView behavior="padding" className="flex-1 bg-black/60 justify-end">
+          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%', paddingBottom: sheetPadBottom }}>
             <Text className="font-heading text-text text-lg">Tutup Sif</Text>
             <Text className="font-body text-muted text-xs mb-4">
               Kas seharusnya di laci: {shift ? formatRupiah(Number(shift.expected_cash)) : '-'}. Hitung seluruh uang di laci
@@ -622,8 +623,8 @@ export function DailyCashScreen({ onOpenSidebar }: DailyCashScreenProps) {
 
       {/* ================= MODAL PENGELUARAN ================= */}
       <Modal visible={expenseModal} transparent animationType="slide" onRequestClose={() => setExpenseModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1 bg-black/60 justify-end">
-          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%' }}>
+        <KeyboardAvoidingView behavior="padding" className="flex-1 bg-black/60 justify-end">
+          <View className="bg-surface rounded-t-3xl p-5 border-t border-line" style={{ maxHeight: '88%', paddingBottom: sheetPadBottom }}>
             <View className="flex-row items-center justify-between pb-3 border-b border-line mb-4">
               <View className="flex-1 mr-2">
                 <Text className="font-heading text-text text-lg">Catat Pengeluaran Harian</Text>

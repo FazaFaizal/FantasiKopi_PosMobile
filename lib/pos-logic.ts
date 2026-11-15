@@ -15,6 +15,8 @@ export interface PosProduct {
   category_id?: string | null;
   status?: string;
   is_active?: boolean;
+  /** URL foto produk; null bila Admin belum mengunggah foto. */
+  image?: string | null;
 }
 
 /**

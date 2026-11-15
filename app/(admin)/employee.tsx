@@ -23,6 +23,7 @@ import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { Ionicons } from '@expo/vector-icons';
 import { useResponsive } from '../../hooks/useResponsive';
+import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 import { useRouter } from 'expo-router';
 import { validateEmployeeInput, getEmployeeStatusChangeMessage, EmployeeInputErrors } from '../../lib/employee-logic';
 
@@ -39,6 +40,7 @@ interface LinkedAccount {
 export default function EmployeeScreen() {
   const { openSidebar } = useAdminSidebar();
   const { isTablet, columns } = useResponsive();
+  const sheetPadBottom = useSheetBottomPadding(24);
   const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
   // Akun login per karyawan (satu karyawan maksimal satu akun)
@@ -222,7 +224,7 @@ export default function EmployeeScreen() {
 
     return (
       <View
-        className="bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm"
+        className="bg-surface rounded-card p-4 mb-3.5 border border-line"
         style={columns > 1 ? { flex: 1 } : undefined}
       >
         <View className="flex-row items-center mb-3">
@@ -261,7 +263,7 @@ export default function EmployeeScreen() {
           <Ionicons
             name={account ? 'key-outline' : 'key'}
             size={14}
-            color={account ? '#166534' : '#9CA3AF'}
+            color={account ? '#166534' : '#6B7280'}
           />
           <Text className="font-body text-muted text-xs ml-1.5 flex-1" numberOfLines={1}>
             {account
@@ -292,7 +294,7 @@ export default function EmployeeScreen() {
             accessibilityLabel={isAktif ? `Nonaktifkan ${item.name}` : `Aktifkan ${item.name}`}
             onPress={() => handleToggleStatus(item)}
             className={`min-h-11 px-3 py-2 rounded-button border border-line flex-row items-center ${
-              isAktif ? 'bg-amber-500/10' : 'bg-success-soft'
+              isAktif ? 'bg-warning-soft' : 'bg-success-soft'
             }`}
           >
             <Ionicons
@@ -302,7 +304,7 @@ export default function EmployeeScreen() {
             />
             <Text
               className={`font-body-medium text-xs ml-1.5 ${
-                isAktif ? 'text-amber-800' : 'text-success'
+                isAktif ? 'text-warning' : 'text-success'
               }`}
             >
               {isAktif ? 'Nonaktifkan' : 'Aktifkan'}
@@ -338,7 +340,7 @@ export default function EmployeeScreen() {
       >
         {/* Search & Add Action Header */}
         <View className="flex-row gap-2 mb-3 items-center">
-          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
+          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line-strong flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
               placeholder="Cari nama, jabatan, nomor, email..."
@@ -448,7 +450,7 @@ export default function EmployeeScreen() {
                   ? 'rounded-card p-6 shadow-xl border border-line'
                   : 'rounded-t-card p-6 border-t border-line'
               }`}
-              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%' }}
+              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%', paddingBottom: sheetPadBottom }}
             >
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -474,7 +476,7 @@ export default function EmployeeScreen() {
 
                 <Input
                   label="Nama Lengkap Karyawan *"
-                  placeholder="Contoh: Budi Santoso"
+                  placeholder="Nama lengkap karyawan"
                   value={name}
                   onChangeText={(t) => {
                     setName(t);

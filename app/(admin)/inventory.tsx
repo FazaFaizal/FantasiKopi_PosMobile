@@ -31,6 +31,7 @@ import {
 import { formatRupiah } from '../../lib/formatters';
 import { StockInPurchaseFields } from '../../components/StockInPurchaseFields';
 import { useResponsive } from '../../hooks/useResponsive';
+import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 
 export { computeStockStatus };
 
@@ -40,6 +41,7 @@ type StockMovement = Database['public']['Tables']['stock_movements']['Row'];
 export default function AdminInventoryScreen() {
   const { openSidebar } = useAdminSidebar();
   const { isTablet, columns } = useResponsive();
+  const sheetPadBottom = useSheetBottomPadding(24);
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -361,7 +363,7 @@ export default function AdminInventoryScreen() {
 
     return (
       <View
-        className={`bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm ${inactive ? 'opacity-60' : ''}`}
+        className={`bg-surface rounded-card p-4 mb-3.5 border border-line ${inactive ? 'opacity-60' : ''}`}
         style={columns > 1 ? { flex: 1 } : undefined}
       >
         <View className="flex-row items-start justify-between mb-2">
@@ -474,7 +476,7 @@ export default function AdminInventoryScreen() {
       >
         {/* Search bar & Add Item Button */}
         <View className="flex-row gap-2 mb-3 items-center">
-          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
+          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line-strong flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
               placeholder="Cari bahan baku..."
@@ -585,7 +587,7 @@ export default function AdminInventoryScreen() {
                   ? 'rounded-card p-6 shadow-xl border border-line'
                   : 'rounded-t-card p-6 border-t border-line'
               }`}
-              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%' }}
+              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%', paddingBottom: sheetPadBottom }}
             >
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -697,7 +699,7 @@ export default function AdminInventoryScreen() {
                   ? 'rounded-card p-6 shadow-xl border border-line'
                   : 'rounded-t-card p-6 border-t border-line'
               }`}
-              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%' }}
+              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%', paddingBottom: sheetPadBottom }}
             >
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -826,7 +828,7 @@ export default function AdminInventoryScreen() {
                 ? 'rounded-card p-6 shadow-xl border border-line'
                 : 'rounded-t-card p-6 border-t border-line'
             }`}
-            style={isTablet ? { width: '100%', maxWidth: 580, height: '80%' } : { height: '80%' }}
+            style={isTablet ? { width: '100%', maxWidth: 580, height: '80%' } : { height: '80%', paddingBottom: sheetPadBottom }}
           >
             <View className="flex-row justify-between items-center mb-1">
               <Text className="font-heading text-text text-xl">Riwayat Perubahan Stok</Text>
@@ -891,7 +893,7 @@ export default function AdminInventoryScreen() {
                         </Text>
                         <Text
                           className={`font-heading text-sm ${
-                            isIn ? 'text-success' : isOut ? 'text-danger' : 'text-amber-800'
+                            isIn ? 'text-success' : isOut ? 'text-danger' : 'text-warning'
                           }`}
                         >
                           {isIn ? `+${m.quantity}` : isOut ? `-${m.quantity}` : `${m.quantity}`} {selectedItemHistory?.unit}

@@ -4,7 +4,6 @@ import {
   Text,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -68,13 +67,13 @@ export default function LoginScreen() {
       edges={["top", "bottom", "left", "right"]}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         style={{ flex: 1 }}
       >
         <ScrollView
           contentContainerStyle={{
             flexGrow: 1,
-            paddingHorizontal: 20,
+            paddingHorizontal: 16,
             paddingVertical: 24,
           }}
           keyboardShouldPersistTaps="handled"
@@ -94,7 +93,7 @@ export default function LoginScreen() {
           >
             {/* Brand Header */}
             <View className="items-center mb-6">
-              <View className="w-14 h-14 rounded-card bg-primary items-center justify-center mb-2.5 shadow-sm">
+              <View className="w-14 h-14 rounded-card bg-primary items-center justify-center mb-2.5">
                 <Ionicons name="cafe" size={28} color="#FFFFFF" />
               </View>
               <Text className="font-heading text-primary text-2xl text-center">
@@ -106,7 +105,7 @@ export default function LoginScreen() {
             </View>
 
             {/* Card Form */}
-            <View className="bg-surface rounded-card p-6 border border-line shadow-sm">
+            <View className="bg-surface rounded-card p-5 border border-line">
               <Text className="font-heading-semibold text-text text-xl mb-1">
                 Masuk ke Akun
               </Text>
@@ -116,7 +115,7 @@ export default function LoginScreen() {
 
               <Input
                 label="Alamat Email"
-                placeholder="nama@fantasicoffee.com"
+                placeholder="nama@email.com"
                 value={email}
                 onChangeText={(text) => {
                   setEmail(text);
@@ -133,7 +132,7 @@ export default function LoginScreen() {
 
               <Input
                 label="Password"
-                placeholder="Masukkan password akun"
+                placeholder="Masukkan password"
                 value={password}
                 onChangeText={(text) => {
                   setPassword(text);

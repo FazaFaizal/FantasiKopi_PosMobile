@@ -8,22 +8,8 @@ import {
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import LayoutDashboard from "lucide-react-native/icons/layout-dashboard";
-import Coffee from "lucide-react-native/icons/coffee";
-import Package from "lucide-react-native/icons/package";
-import Layers from "lucide-react-native/icons/layers";
-import Users from "lucide-react-native/icons/users";
-import UserCheck from "lucide-react-native/icons/user-check";
-import LogOut from "lucide-react-native/icons/log-out";
-import X from "lucide-react-native/icons/x";
-import Store from "lucide-react-native/icons/store";
-import Receipt from "lucide-react-native/icons/receipt";
-import Wallet from "lucide-react-native/icons/wallet";
-import Banknote from "lucide-react-native/icons/banknote";
-import TrendingUp from "lucide-react-native/icons/trending-up";
-import ClipboardList from "lucide-react-native/icons/clipboard-list";
-import CircleUser from "lucide-react-native/icons/circle-user";
-import type { LucideIcon } from "lucide-react-native";
+import { Ionicons } from "@expo/vector-icons";
+import type { IncomingOrderRow } from "../lib/incoming-orders-logic";
 import { useResponsive } from "../hooks/useResponsive";
 import { isRouteActive } from "../lib/navigation-logic";
 
@@ -32,7 +18,7 @@ export interface SidebarNavItem {
   route: string;
   title: string;
   subtitle: string;
-  icon: LucideIcon;
+  icon: keyof typeof Ionicons.glyphMap;
 }
 
 export const SIDEBAR_NAV_ITEMS: {
@@ -45,49 +31,49 @@ export const SIDEBAR_NAV_ITEMS: {
       route: "/(admin)/dashboard",
       title: "Dashboard",
       subtitle: "Ringkasan Operasional & Grafik",
-      icon: LayoutDashboard,
+      icon: "grid-outline",
     },
     {
       id: "orders",
       route: "/(admin)/orders",
       title: "Pesanan",
       subtitle: "Semua Order, Pembatalan & Koreksi Pembayaran",
-      icon: ClipboardList,
+      icon: "clipboard-outline",
     },
     {
       id: "product",
       route: "/(admin)/product",
       title: "Katalog Produk",
       subtitle: "Manajemen Menu & Harga Minuman",
-      icon: Coffee,
+      icon: "cafe-outline",
     },
     {
       id: "inventory",
       route: "/(admin)/inventory",
       title: "Bahan Baku & Stok",
       subtitle: "Inventaris Gudang & Peringatan Stok",
-      icon: Package,
+      icon: "cube-outline",
     },
     {
       id: "cash",
       route: "/(admin)/cash",
       title: "Kas Harian",
       subtitle: "Rekap Uang Laci & Pengeluaran Hari Ini",
-      icon: Banknote,
+      icon: "cash-outline",
     },
     {
       id: "expense",
       route: "/(admin)/expense",
       title: "Biaya Operasional",
       subtitle: "Pencatatan & Alokasi Pengeluaran",
-      icon: Wallet,
+      icon: "wallet-outline",
     },
     {
       id: "report",
       route: "/(admin)/report",
       title: "Laporan & Finansial",
       subtitle: "Analisis Penjualan & Laba Bersih",
-      icon: TrendingUp,
+      icon: "trending-up-outline",
     },
   ],
   management: [
@@ -96,28 +82,28 @@ export const SIDEBAR_NAV_ITEMS: {
       route: "/(admin)/profile",
       title: "Profil Saya",
       subtitle: "Akun & Ganti Password",
-      icon: CircleUser,
+      icon: "person-circle-outline",
     },
     {
       id: "category",
       route: "/(admin)/category",
       title: "Kategori Menu",
       subtitle: "Master Kategori Minuman & Makanan",
-      icon: Layers,
+      icon: "layers-outline",
     },
     {
       id: "employee",
       route: "/(admin)/employee",
       title: "Kelola Karyawan",
       subtitle: "Data Staf, Posisi & Status Kerja",
-      icon: Users,
+      icon: "people-outline",
     },
     {
       id: "user",
       route: "/(admin)/user",
       title: "Akun Pengguna",
       subtitle: "Manajemen Login & Hak Akses",
-      icon: UserCheck,
+      icon: "key-outline",
     },
   ],
 };
@@ -132,35 +118,35 @@ export const KASIR_NAV_ITEMS: {
       route: "/(kasir)/pos",
       title: "Terminal POS",
       subtitle: "Katalog Menu & Transaksi Kasir",
-      icon: Store,
+      icon: "storefront-outline",
     },
     {
       id: "orders",
       route: "/(kasir)/orders",
       title: "Riwayat Transaksi",
       subtitle: "Status Pesanan & Pembatalan",
-      icon: Receipt,
+      icon: "receipt-outline",
     },
     {
       id: "inventory",
       route: "/(kasir)/inventory",
       title: "Bahan Baku & Stok",
       subtitle: "Inventaris Gudang & Mutasi Bahan",
-      icon: Package,
+      icon: "cube-outline",
     },
     {
       id: "cash",
       route: "/(kasir)/cash",
       title: "Kas Harian",
       subtitle: "Rekap Uang Laci & Pengeluaran Harian",
-      icon: Banknote,
+      icon: "cash-outline",
     },
     {
       id: "profile",
       route: "/(kasir)/profile",
       title: "Profil Saya",
       subtitle: "Akun & Ganti Password",
-      icon: CircleUser,
+      icon: "person-circle-outline",
     },
   ],
 };
@@ -198,9 +184,15 @@ export function useAdminSidebar() {
 export const KasirSidebarContext = React.createContext<{
   openSidebar: () => void;
   closeSidebar: () => void;
+  /** Pesanan customer yang perlu ditindaklanjuti kasir (panel notifikasi POS). */
+  incoming: IncomingOrderRow[];
+  /** Buka Riwayat Transaksi lalu tampilkan detail pesanan tersebut. */
+  openOrder: (orderId: string) => void;
 }>({
   openSidebar: () => {},
   closeSidebar: () => {},
+  incoming: [],
+  openOrder: () => {},
 });
 
 export function useKasirSidebar() {
@@ -227,7 +219,7 @@ export function SidebarDrawer({
   const handleLogoutPress = () => {
     Alert.alert(
       "Konfirmasi Keluar",
-      "Apakah Anda yakin ingin keluar dari sesi Admin kedai kopi ini?",
+      "Apakah Anda yakin ingin keluar dari akun ini?",
       [
         { text: "Batal", style: "cancel" },
         {
@@ -250,7 +242,7 @@ export function SidebarDrawer({
     }, 50);
   };
 
-  const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : "A";
+  const userInitial = user?.email ? user.email.charAt(0).toUpperCase() : "-";
 
   return (
     <Modal
@@ -268,14 +260,14 @@ export function SidebarDrawer({
             width: isTablet ? "50%" : "82%",
             maxWidth: isTablet ? 380 : 340,
           }}
-          className="bg-surface h-full flex-col justify-between shadow-2xl"
+          className="bg-surface h-full flex-col justify-between shadow-xl"
         >
           {/* Header Section */}
           <View className="px-5 pb-4 border-b border-line">
             <View className="flex-row items-center justify-between mb-4">
               <View className="flex-row items-center">
                 <View className="w-9 h-9 rounded-full bg-primary items-center justify-center mr-2.5">
-                  <Store size={20} color="#FFFFFF" />
+                  <Ionicons name="storefront-outline" size={20} color="#FFFFFF" />
                 </View>
                 <View>
                   <Text className="font-heading text-text text-base leading-tight">
@@ -294,7 +286,7 @@ export function SidebarDrawer({
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 className="w-8 h-8 rounded-full bg-background items-center justify-center border border-line"
               >
-                <X size={18} color="#6B7280" />
+                <Ionicons name="close" size={18} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
@@ -310,14 +302,11 @@ export function SidebarDrawer({
                   className="font-heading-semibold text-text text-sm"
                   numberOfLines={1}
                 >
-                  {user?.email || "admin@fantasicoffee.com"}
+                  {user?.email || "-"}
                 </Text>
-                <View className="flex-row items-center mt-0.5">
-                  <View className="w-2 h-2 rounded-full bg-success mr-1.5" />
-                  <Text className="font-body-medium text-primary text-xs">
-                    {user?.role || "Admin"} • Cabang Utama
-                  </Text>
-                </View>
+                {user?.role ? (
+                  <Text className="font-body-medium text-primary text-xs mt-0.5">{user.role}</Text>
+                ) : null}
               </View>
             </View>
           </View>
@@ -328,12 +317,11 @@ export function SidebarDrawer({
             className="flex-1 px-4 py-3"
           >
             {/* Main Operations Section */}
-            <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider px-2 mb-2">
-              Fitur Utama
+            <Text className="font-body-semibold text-muted text-xs px-2 mb-2">
+              Fitur utama
             </Text>
             {navItems.main.map((item) => {
               const isActive = isRouteActive(activeRoute, item.route);
-              const Icon = item.icon;
 
               return (
                 <TouchableOpacity
@@ -353,7 +341,7 @@ export function SidebarDrawer({
                       isActive ? "bg-primary" : "bg-background border border-line"
                     }`}
                   >
-                    <Icon size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
+                    <Ionicons name={item.icon} size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
                   </View>
                   <View className="flex-1">
                     <Text
@@ -378,12 +366,11 @@ export function SidebarDrawer({
             {/* Management & Master Section (Hanya jika ada) */}
             {navItems.management && navItems.management.length > 0 && (
               <>
-                <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider px-2 mt-4 mb-2">
-                  Administrasi &amp; Master Data
+                <Text className="font-body-semibold text-muted text-xs px-2 mt-4 mb-2">
+                  Administrasi & data master
                 </Text>
                 {navItems.management.map((item) => {
                   const isActive = isRouteActive(activeRoute, item.route);
-                  const Icon = item.icon;
 
                   return (
                     <TouchableOpacity
@@ -403,7 +390,7 @@ export function SidebarDrawer({
                           isActive ? "bg-primary" : "bg-background border border-line"
                         }`}
                       >
-                        <Icon size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
+                        <Ionicons name={item.icon} size={18} color={isActive ? "#FFFFFF" : "#4B5563"} />
                       </View>
                       <View className="flex-1">
                         <Text
@@ -432,8 +419,8 @@ export function SidebarDrawer({
           <View className="px-5 pt-3 border-t border-line">
             {/* Orientasi Layar (Tablet POS) */}
             <View className="mb-3">
-              <Text className="font-body-semibold text-muted text-xs uppercase tracking-wider mb-1.5">
-                Orientasi Layar
+              <Text className="font-body-semibold text-muted text-xs mb-1.5">
+                Orientasi layar
               </Text>
               <View className="flex-row bg-background rounded-chip p-1 border border-line">
                 {(['auto', 'landscape', 'portrait'] as const).map((mode) => {
@@ -443,10 +430,11 @@ export function SidebarDrawer({
                   return (
                     <TouchableOpacity
                       key={mode}
-                      accessibilityRole="button"
+                      accessibilityRole="radio"
                       accessibilityLabel={`Orientasi ${label}`}
+                      accessibilityState={{ selected: isSelected }}
                       onPress={() => setOrientationMode(mode)}
-                      className={`flex-1 py-1.5 rounded-chip items-center justify-center ${
+                      className={`flex-1 min-h-11 rounded-chip items-center justify-center ${
                         isSelected ? 'bg-primary' : 'bg-transparent'
                       }`}
                     >
@@ -465,11 +453,11 @@ export function SidebarDrawer({
 
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel="Keluar dari akun admin"
+              accessibilityLabel="Keluar dari akun"
               onPress={handleLogoutPress}
               className="flex-row items-center justify-center bg-danger-soft border border-line py-3 px-4 rounded-button min-h-12"
             >
-              <LogOut size={18} color="#991B1B" />
+              <Ionicons name="log-out-outline" size={18} color="#991B1B" />
               <Text className="font-heading-semibold text-danger ml-2 text-sm">
                 Keluar dari Akun
               </Text>
@@ -506,7 +494,7 @@ function NavBadge({ count }: { count?: number }) {
       accessibilityLabel={`${count} menunggu`}
       className="min-w-6 h-6 px-1.5 rounded-full bg-primary items-center justify-center ml-2"
     >
-      <Text className="font-heading-bold text-white text-xs">{count > 99 ? '99+' : count}</Text>
+      <Text className="font-heading text-white text-xs">{count > 99 ? '99+' : count}</Text>
     </View>
   );
 }

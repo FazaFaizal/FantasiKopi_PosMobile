@@ -10,10 +10,9 @@ import {
   Alert,
   RefreshControl,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { ScreenHeader } from './ScreenHeader';
@@ -45,6 +44,7 @@ import {
   isAwaitingCustomerPayment,
 } from '../lib/order-logic';
 import { useResponsive } from '../hooks/useResponsive';
+import { useSheetBottomPadding } from '../hooks/useSheetPadding';
 import { isHiddenFromKasir, isOnlineOrder } from '../lib/payment-gateway-logic';
 
 interface OrderItemDetail {
@@ -67,8 +67,11 @@ const PAGE_SIZE = 50;
  * Admin juga dapat mengoreksi metode pembayaran order yang sudah lunas.
  */
 export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
+  const sheetPadBottom = useSheetBottomPadding(0);
   const { user } = useAuth();
   const { isTablet } = useResponsive();
+  const router = useRouter();
+  const { openOrderId } = useLocalSearchParams<{ openOrderId?: string }>();
 
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,6 +210,27 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
       setLoadingItems(false);
     }
   };
+
+  // Datang dari tombol "Pesanan masuk" atau banner: langsung tampilkan detail pesanan itu.
+  useEffect(() => {
+    if (!openOrderId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.from('orders').select('*').eq('id', openOrderId).maybeSingle();
+      if (cancelled) return;
+      router.setParams({ openOrderId: undefined });
+      if (error || !data) {
+        Alert.alert('Pesanan Tidak Ditemukan', error?.message || 'Pesanan mungkin sudah dibatalkan atau kedaluwarsa.');
+        return;
+      }
+      handleOpenDetail(data as unknown as OrderRecord);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Hanya bereaksi pada parameter baru; handleOpenDetail dibuat ulang tiap render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openOrderId]);
 
   const handleUpdateStatus = async (nextStatus: OrderStatus) => {
     if (!selectedOrder) return;
@@ -477,18 +501,18 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
       {/* Bar Filter Rentang Tanggal & Search Box */}
       <View className="p-3 bg-surface border-b border-line">
         {/* Search Input */}
-        <View className="flex-row items-center bg-background border border-line rounded-chip px-3 py-1.5 mb-2.5">
-          <Ionicons name="search" size={16} color="#9CA3AF" />
+        <View className="flex-row items-center bg-background border border-line-strong rounded-chip px-3 py-1.5 min-h-11 mb-2.5">
+          <Ionicons name="search" size={16} color="#6B7280" />
           <TextInput
             placeholder="Cari no. order atau nama pelanggan..."
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor="#6B7280"
             value={searchQuery}
             onChangeText={setSearchQuery}
             className="flex-1 ml-2 font-body text-xs text-text py-1"
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={16} color="#9CA3AF" />
+              <Ionicons name="close-circle" size={16} color="#6B7280" />
             </TouchableOpacity>
           )}
         </View>
@@ -534,7 +558,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
             accessibilityLabel="Selesaikan semua pesanan siap"
             onPress={handleBulkComplete}
             disabled={updatingStatus}
-            className="mt-2.5 py-2 rounded-chip bg-emerald-600 flex-row items-center justify-center"
+            className="mt-2.5 py-2 rounded-chip bg-success flex-row items-center justify-center"
           >
             <Ionicons name="checkmark-done" size={15} color="#FFFFFF" />
             <Text className="font-heading-semibold text-white text-xs ml-1.5">
@@ -567,7 +591,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
               }`}
             >
               <Text
-                className={`text-[11px] font-heading-semibold ${
+                className={`text-xs font-heading-semibold ${
                   statusFilter === st.id ? 'text-white' : 'text-muted'
                 }`}
               >
@@ -629,8 +653,8 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                 accessibilityRole="button"
                 accessibilityLabel={`Detail ${item.order_number}`}
                 onPress={() => handleOpenDetail(item)}
-                className={`flex-1 m-1.5 bg-surface border border-line rounded-card p-3.5 shadow-sm justify-between ${
-                  item.order_status === 'Cancelled' ? 'bg-slate-50/80' : ''
+                className={`flex-1 m-1.5 bg-surface border border-line rounded-card p-3.5 justify-between ${
+                  item.order_status === 'Cancelled' ? 'bg-background' : ''
                 }`}
               >
                 {/* Header Kartu: Nomor Order & Badge Status */}
@@ -639,7 +663,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                     <Text className="font-heading-semibold text-text text-sm" numberOfLines={1}>
                       {item.order_number}
                     </Text>
-                    <Text className="font-body text-muted text-[11px] mt-0.5">
+                    <Text className="font-body text-muted text-xs mt-0.5">
                       {dateStr} • {timeStr}
                     </Text>
                   </View>
@@ -654,16 +678,16 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                       {item.customer_name || 'Pelanggan Umum'}
                     </Text>
                   </View>
-                  <View className="bg-background px-2 py-0.5 rounded-chip border border-line">
-                    <Text className="text-[10px] font-heading-semibold text-muted">
-                      {item.order_type || 'Dine In'}
-                    </Text>
-                  </View>
+                  {item.order_type ? (
+                    <View className="bg-background px-2 py-0.5 rounded-chip border border-line">
+                      <Text className="text-xs font-heading-semibold text-muted">{item.order_type}</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Footer Kartu: Metode Bayar & Total Tagihan */}
                 <View className="flex-row justify-between items-center">
-                  <View className="flex-row items-center">
+                  <View className="flex-row items-center flex-wrap flex-1 mr-2">
                     <Ionicons
                       name={getPaymentMethodMeta(item.payment_method).icon}
                       size={15}
@@ -673,15 +697,15 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                       {item.payment_method}
                     </Text>
                     {isOnlineOrder(item) && (
-                      <Text className="text-[10px] font-heading-semibold text-primary ml-1.5">(Online)</Text>
+                      <Text className="text-xs font-heading-semibold text-primary ml-1.5">(Online)</Text>
                     )}
                     {item.payment_status === 'Refunded' && (
-                      <Text className="text-[10px] font-heading-semibold text-rose-600 ml-1.5">
+                      <Text className="text-xs font-heading-semibold text-danger ml-1.5">
                         (Dikembalikan)
                       </Text>
                     )}
                     {item.order_status !== 'Cancelled' && !isPaymentSettled(item.payment_status) && (
-                      <Text className="text-[10px] font-heading-semibold text-amber-700 ml-1.5">
+                      <Text className="text-xs font-heading-semibold text-warning ml-1.5">
                         (Belum Bayar)
                       </Text>
                     )}
@@ -701,25 +725,37 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
       <Modal
         visible={Boolean(selectedOrder)}
         transparent={true}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setSelectedOrder(null)}
       >
-        <View className="flex-1 bg-black/60 justify-end md:justify-center items-center">
-          <View className="bg-surface w-full max-w-lg rounded-t-2xl md:rounded-2xl max-h-[90%] border border-line flex-col">
+        <View className={`flex-1 bg-black/60 items-center ${isTablet ? 'justify-center p-6' : 'justify-end'}`}>
+          <View
+            className={`bg-surface w-full border border-line ${isTablet ? 'rounded-card' : 'rounded-t-card'}`}
+            style={{ maxWidth: isTablet ? 640 : undefined, maxHeight: isTablet ? '90%' : '92%', paddingBottom: isTablet ? 0 : sheetPadBottom }}
+          >
             {/* Modal Header */}
             {selectedOrder && (
-              <View className="p-4 border-b border-line flex-row justify-between items-center">
-                <View>
-                  <Text className="font-heading-semibold text-text text-base">
+              <View className="px-4 pt-4 pb-3 border-b border-line flex-row justify-between items-start">
+                <View className="flex-1 mr-2">
+                  <Text className="font-heading text-text text-lg">
                     {selectedOrder.order_number}
                   </Text>
-                  <Text className="font-body text-muted text-xs">
-                    {selectedOrder.order_type} • {selectedOrder.customer_name}
+                  <Text className="font-body text-muted text-sm">
+                    {[selectedOrder.order_type, selectedOrder.customer_name].filter(Boolean).join(' · ')}
                   </Text>
+                  <View className="flex-row flex-wrap gap-1.5 mt-2">
+                    <Badge
+                      label={selectedOrder.order_status}
+                      tone={getOrderStatusBadgeTone(selectedOrder.order_status)}
+                    />
+                    <Badge {...getPaymentStatusMeta(selectedOrder.payment_status, selectedOrder.order_status)} />
+                  </View>
                 </View>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Tutup detail pesanan"
                   onPress={() => setSelectedOrder(null)}
-                  className="p-1.5 rounded-full bg-background border border-line"
+                  className="w-11 h-11 -mr-2 -mt-1 items-center justify-center"
                 >
                   <Ionicons name="close" size={18} color="#6B7280" />
                 </TouchableOpacity>
@@ -728,66 +764,49 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
 
             {/* Modal Body Scroll */}
             {selectedOrder && (
-              <ScrollView className="p-4 flex-1" showsVerticalScrollIndicator={false}>
-                {/* Status Banner */}
-                <View className="flex-row justify-between items-center p-3 rounded-card bg-background border border-line mb-3.5">
-                  <View>
-                    <Text className="font-body text-muted text-xs">Status Pesanan:</Text>
-                    <Text className="font-heading-semibold text-text text-sm">
-                      {selectedOrder.order_status}
-                    </Text>
-                  </View>
-                  <Badge
-                    label={selectedOrder.order_status}
-                    tone={getOrderStatusBadgeTone(selectedOrder.order_status)}
-                  />
-                </View>
-
+              <ScrollView
+                style={{ flexGrow: 0, flexShrink: 1 }}
+                contentContainerStyle={{ padding: 16 }}
+                showsVerticalScrollIndicator={false}
+              >
                 {/* Jika Dibatalkan, Tampilkan Alasan */}
                 {selectedOrder.order_status === 'Cancelled' && (
-                  <View className="p-3 rounded-card bg-rose-50 border border-rose-200 mb-3.5">
+                  <View className="p-3 rounded-chip bg-danger-soft mb-4">
                     <View className="flex-row items-center mb-1">
-                      <Ionicons name="alert-circle" size={16} color="#DC2626" />
-                      <Text className="font-heading-semibold text-rose-700 text-xs ml-1.5">
+                      <Ionicons name="alert-circle" size={16} color="#991B1B" />
+                      <Text className="font-heading-semibold text-danger text-xs ml-1.5">
                         Pesanan Dibatalkan
                       </Text>
                     </View>
-                    <Text className="font-body text-rose-900 text-xs">
+                    <Text className="font-body text-danger text-sm">
                       Alasan: {selectedOrder.cancellation_reason || 'Tidak ada keterangan'}
-                    </Text>
-                    <Text className="font-body text-rose-700 text-[11px] mt-1">
-                      Pembayaran: {getPaymentStatusMeta(selectedOrder.payment_status, selectedOrder.order_status).label}
                     </Text>
                   </View>
                 )}
 
                 {/* List Menu Items (Snapshot) */}
-                <Text className="font-heading-semibold text-text text-xs mb-2">
-                  Daftar Menu yang Dipesan
-                </Text>
+                <Text className="font-body-semibold text-muted text-xs mb-1">Pesanan</Text>
 
                 {loadingItems ? (
                   <LoadingState label="Memuat rincian menu..." />
                 ) : (
-                  <View className="bg-background rounded-card p-2 border border-line mb-3.5">
+                  <View className="mb-2">
                     {orderItems.map((item, idx) => (
                       <View
                         key={item.id || idx}
-                        className={`p-2 ${
-                          idx !== orderItems.length - 1 ? 'border-b border-line/60' : ''
-                        }`}
+                        className={`py-2 ${idx !== orderItems.length - 1 ? 'border-b border-line' : ''}`}
                       >
                         <View className="flex-row justify-between items-center">
-                          <Text className="font-heading-semibold text-text text-xs flex-1 mr-2">
+                          <Text className="font-heading-semibold text-text text-sm flex-1 mr-2">
                             {item.quantity}x {item.product_name}
                           </Text>
-                          <Text className="font-heading-semibold text-text text-xs">
+                          <Text className="font-heading-semibold text-text text-sm">
                             {formatRupiah(item.subtotal)}
                           </Text>
                         </View>
                         {item.notes ? (
-                          <Text className="font-body text-muted text-[11px] italic mt-0.5">
-                            * {item.notes}
+                          <Text className="font-body text-muted text-sm italic mt-0.5">
+                            Catatan: {item.notes}
                           </Text>
                         ) : null}
                       </View>
@@ -796,24 +815,18 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                 )}
 
                 {/* Ringkasan Finansial */}
-                <View className="bg-background rounded-card p-3 border border-line mb-4">
-                  <View className="flex-row justify-between mb-1">
-                    <Text className="font-body text-muted text-xs">Total Tagihan:</Text>
-                    <Text className="font-heading-semibold text-primary text-sm">
+                <View className="pt-3 border-t border-line">
+                  <View className="flex-row justify-between items-center mb-1">
+                    <Text className="font-heading-semibold text-text text-base">Total</Text>
+                    <Text className="font-heading text-primary text-xl">
                       {formatRupiah(selectedOrder.total_amount)}
                     </Text>
                   </View>
-                  <View className="flex-row justify-between mb-1">
-                    <Text className="font-body text-muted text-xs">Metode Pembayaran:</Text>
-                    <Text className="font-body-medium text-text text-xs">
-                      {selectedOrder.payment_method}
-                    </Text>
-                  </View>
                   <View className="flex-row justify-between">
-                    <Text className="font-body text-muted text-xs">Status Pembayaran:</Text>
-                    <Badge
-                      {...getPaymentStatusMeta(selectedOrder.payment_status, selectedOrder.order_status)}
-                    />
+                    <Text className="font-body text-muted text-sm">Metode pembayaran</Text>
+                    <Text className="font-body-medium text-text text-sm">
+                      {selectedOrder.payment_method || '-'}
+                    </Text>
                   </View>
                 </View>
               </ScrollView>
@@ -821,7 +834,7 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
 
             {/* Actions Footer */}
             {selectedOrder && (
-              <View className="p-4 border-t border-line bg-surface flex-col gap-2">
+              <View className="px-4 pt-3 pb-4 border-t border-line gap-2">
                 {isAwaitingCustomerPayment(selectedOrder) && selectedOrder.payment_due_at && (
                   <View className="flex-row items-center justify-center">
                     <PaymentCountdown order={selectedOrder} now={now} long />
@@ -869,23 +882,21 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                       />
                     </View>
                     <View className="flex-1">
-                      <TouchableOpacity
-                        onPress={() => handleUpdateStatus('Completed')}
+                      <Button
+                        title={updatingStatus ? 'Menyimpan...' : 'Selesaikan'}
+                        variant="success"
                         disabled={updatingStatus}
-                        className="h-11 bg-emerald-600 rounded-button items-center justify-center flex-row"
-                      >
-                        <Ionicons name="checkmark-done" size={16} color="#FFFFFF" />
-                        <Text className="font-heading-semibold text-white text-xs ml-1.5">
-                          Selesaikan
-                        </Text>
-                      </TouchableOpacity>
+                        onPress={() => handleUpdateStatus('Completed')}
+                        icon={<Ionicons name="checkmark-done" size={16} color="#FFFFFF" />}
+                      />
                     </View>
                   </View>
                 )}
 
                 {selectedOrder.order_status === 'Ready' && (
                   <Button
-                    title={updatingStatus ? 'Menyimpan...' : 'Selesaikan Pesanan (Completed)'}
+                    title={updatingStatus ? 'Menyimpan...' : 'Selesaikan Pesanan'}
+                    variant="success"
                     disabled={updatingStatus}
                     onPress={() => handleUpdateStatus('Completed')}
                     icon={<Ionicons name="checkmark-done" size={18} color="#FFFFFF" />}
@@ -915,33 +926,15 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
                       accessibilityRole="button"
                       accessibilityLabel="Batalkan Pesanan & Refund"
                       onPress={handleOpenCancelModal}
-                      className="py-2.5 rounded-button border border-rose-300 bg-rose-50 items-center justify-center flex-row"
+                      className="min-h-11 rounded-button border border-danger/30 bg-danger-soft items-center justify-center flex-row"
                     >
-                      <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
-                      <Text className="font-heading-semibold text-rose-700 text-xs ml-1.5">
+                      <Ionicons name="close-circle-outline" size={16} color="#991B1B" />
+                      <Text className="font-heading-semibold text-danger text-xs ml-1.5">
                         Batalkan Pesanan & Refund
                       </Text>
                     </TouchableOpacity>
                   )}
-
-                {/* Tombol Cetak Ulang Struk Kasir */}
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Cetak Ulang Struk"
-                  onPress={() => {
-                    Alert.alert(
-                      "Mencetak Struk Kasir",
-                      `Simulasi cetak struk untuk pesanan ${selectedOrder.order_number} berhasil dikirim ke antrean cetak.\n(Koneksi printer thermal fisik akan dihubungkan nanti).`,
-                      [{ text: "OK" }]
-                    );
-                  }}
-                  className="py-2.5 rounded-button border border-line bg-surface items-center justify-center flex-row"
-                >
-                  <Ionicons name="print-outline" size={16} color="#1F2937" />
-                  <Text className="font-heading-semibold text-text text-xs ml-1.5">
-                    Cetak Struk (Printer Thermal)
-                  </Text>
-                </TouchableOpacity>
+                {/* TODO: tombol cetak ulang struk ditambahkan kembali setelah printer thermal tersambung. */}
               </View>
             )}
           </View>
@@ -956,13 +949,13 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
         onRequestClose={() => setCancelModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           className="flex-1 bg-black/60 justify-center items-center p-4"
         >
-          <View className="bg-surface w-full max-w-md rounded-card p-5 border border-line shadow-2xl">
+          <View className="bg-surface w-full max-w-md rounded-card p-5 border border-line shadow-xl">
             <View className="items-center mb-3">
-              <View className="w-12 h-12 rounded-full bg-rose-500/10 items-center justify-center mb-2 border border-rose-500/20">
-                <Ionicons name="warning-outline" size={24} color="#DC2626" />
+              <View className="w-12 h-12 rounded-full bg-danger-soft items-center justify-center mb-2 border border-danger/30">
+                <Ionicons name="warning-outline" size={24} color="#991B1B" />
               </View>
               <Text className="font-heading text-text text-base">Batalkan Pesanan?</Text>
               <Text className="font-body text-muted text-xs text-center mt-1">
@@ -972,31 +965,31 @@ export function OrdersScreen({ onOpenSidebar }: OrdersScreenProps) {
 
             <View className="mb-4">
               <Text className="font-heading-semibold text-text text-xs mb-1.5">
-                Alasan Pembatalan <Text className="text-rose-600">*</Text>
+                Alasan Pembatalan <Text className="text-danger">*</Text>
               </Text>
               <TextInput
                 placeholder="Contoh: Pelanggan salah pesan / minta batalkan"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor="#6B7280"
                 value={cancellationReason}
                 onChangeText={setCancellationReason}
                 multiline
                 numberOfLines={3}
                 style={{ height: 75, textAlignVertical: 'top' }}
-                className="bg-background border border-line rounded-chip p-2.5 text-xs font-body text-text"
+                className="bg-background border border-line-strong rounded-chip p-2.5 text-xs font-body text-text"
               />
             </View>
 
             <View className="flex-row gap-2">
               <TouchableOpacity
                 onPress={() => setCancelModalVisible(false)}
-                className="flex-1 py-2.5 rounded-button border border-line bg-background items-center justify-center"
+                className="flex-1 min-h-11 rounded-button border border-line bg-background items-center justify-center"
               >
                 <Text className="font-heading-semibold text-text text-xs">Kembali</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleConfirmCancel}
                 disabled={cancellingOrder}
-                className="flex-1 py-2.5 rounded-button bg-rose-600 items-center justify-center"
+                className="flex-1 min-h-11 rounded-button bg-danger items-center justify-center"
               >
                 <Text className="font-heading-semibold text-white text-xs">
                   {cancellingOrder ? 'Membatalkan...' : 'Ya, Batalkan'}
@@ -1017,18 +1010,18 @@ function PaymentCountdown({ order, now, long = false }: { order: OrderRecord; no
   const expired = left <= 0;
   return (
     <Text
-      accessibilityLiveRegion="polite"
-      className={`font-heading-semibold ${long ? 'text-xs' : 'text-[10px] ml-1.5'} ${
-        expired ? 'text-rose-600' : left < 3 * 60_000 ? 'text-amber-700' : 'text-muted'
+      accessibilityLiveRegion={expired ? "polite" : "none"}
+      className={`font-heading-semibold ${long ? 'text-xs' : 'text-xs ml-1.5'} ${
+        expired ? 'text-danger' : left < 3 * 60_000 ? 'text-warning' : 'text-muted'
       }`}
     >
       {expired
         ? long
-          ? 'Batas bayar habis — pesanan akan dibatalkan otomatis'
+          ? 'Batas bayar habis. Pesanan akan dibatalkan otomatis'
           : 'Kedaluwarsa'
         : long
         ? `Sisa waktu bayar ${formatCountdown(left)}`
-        : `⏱ ${formatCountdown(left)}`}
+        : `Sisa ${formatCountdown(left)}`}
     </Text>
   );
 }

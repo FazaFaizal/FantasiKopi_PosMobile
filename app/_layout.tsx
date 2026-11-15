@@ -6,8 +6,11 @@ import { View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Poppins_400Regular, Poppins_600SemiBold, Poppins_700Bold } from '@expo-google-fonts/poppins';
-import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import '../global.css';
+import { installWebAlert } from '../lib/web-alert';
+
+installWebAlert();
 
 function RootLayoutNav() {
   const { session, user, isLoading } = useAuth();
@@ -20,6 +23,7 @@ function RootLayoutNav() {
     'Poppins-Bold': Poppins_700Bold,
     'Inter-Regular': Inter_400Regular,
     'Inter-Medium': Inter_500Medium,
+    'Inter-SemiBold': Inter_600SemiBold,
   });
 
   const isReady = !isLoading && (fontsLoaded || !!fontError);

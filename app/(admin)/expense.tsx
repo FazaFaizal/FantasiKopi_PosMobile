@@ -9,7 +9,6 @@ import {
   TextInput,
   Alert,
   KeyboardAvoidingView,
-  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
@@ -23,6 +22,7 @@ import { Input } from "../../components/Input";
 import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { formatRupiah } from "../../lib/formatters";
 import { useResponsive } from "../../hooks/useResponsive";
+import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 import {
   EXPENSE_CATEGORIES,
   ExpenseCategory,
@@ -38,6 +38,7 @@ export default function ExpenseScreen() {
   const { openSidebar } = useAdminSidebar();
   const { user } = useAuth();
   const { isTablet } = useResponsive();
+  const sheetPadBottom = useSheetBottomPadding(20);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -226,7 +227,7 @@ export default function ExpenseScreen() {
     const meta = getExpenseCategoryMeta(item.category);
 
     return (
-      <View className="bg-surface rounded-card p-4 mb-3 border border-line shadow-sm">
+      <View className="bg-surface rounded-card p-4 mb-3 border border-line">
         <View className="flex-row justify-between items-start mb-2">
           <View className="flex-1 mr-2">
             <View className="flex-row items-center mb-1">
@@ -238,12 +239,12 @@ export default function ExpenseScreen() {
             {item.stock_movement_id ? (
               <View className="flex-row items-center mb-1">
                 <Ionicons name="cube-outline" size={12} color="#6B7280" />
-                <Text className="font-body-medium text-muted text-[11px] ml-1">
+                <Text className="font-body-medium text-muted text-xs ml-1">
                   Dari Stock In (stok sudah tercatat)
                 </Text>
               </View>
             ) : null}
-            <Text className="font-body text-muted text-[11px] mb-1">
+            <Text className="font-body text-muted text-xs mb-1">
               {item.paid_from_cash ? "Dibayar dari kas laci" : "Dibayar dari sumber lain"}
             </Text>
             <Text
@@ -298,7 +299,7 @@ export default function ExpenseScreen() {
         style={isTablet ? { maxWidth: 1000, width: "100%", alignSelf: "center" } : undefined}
       >
         {/* Total Expense Summary Banner */}
-        <View className="bg-primary/10 rounded-card p-4 mb-3 border border-primary/20 flex-row justify-between items-center shadow-sm">
+        <View className="bg-primary/10 rounded-card p-4 mb-3 border border-primary/20 flex-row justify-between items-center">
           <View className="flex-row items-center">
             <View className="w-11 h-11 rounded-chip bg-primary items-center justify-center mr-3">
               <Ionicons name="wallet-outline" size={22} color="#FFFFFF" />
@@ -324,7 +325,7 @@ export default function ExpenseScreen() {
 
         {/* Search Bar & Add Button */}
         <View className="flex-row gap-2 mb-3 items-center">
-          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
+          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line-strong flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
               placeholder="Cari deskripsi pengeluaran..."
@@ -395,8 +396,9 @@ export default function ExpenseScreen() {
               <TouchableOpacity
                 key={cat}
                 accessibilityRole="button"
+                accessibilityState={{ selected: active }}
                 onPress={() => setCategoryFilter(cat)}
-                className={`px-3 py-1.5 mr-2 rounded-full border ${
+                className={`px-3 min-h-11 justify-center mr-2 rounded-chip border ${
                   active
                     ? "bg-text border-text"
                     : "bg-surface border-line"
@@ -451,12 +453,12 @@ export default function ExpenseScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
           className="flex-1 bg-black/60 justify-end"
         >
           <View
-            className="bg-surface rounded-t-3xl p-5 border-t border-line shadow-2xl"
-            style={{ maxHeight: "88%" }}
+            className="bg-surface rounded-t-3xl p-5 border-t border-line shadow-xl"
+            style={{ maxHeight: "88%", paddingBottom: sheetPadBottom }}
           >
             {/* Modal Header */}
             <View className="flex-row items-center justify-between pb-3 border-b border-line mb-4">
@@ -591,7 +593,7 @@ export default function ExpenseScreen() {
                 />
                 <View className="ml-2 flex-1">
                   <Text className="font-body-medium text-text text-sm">Dibayar dari kas laci</Text>
-                  <Text className="font-body text-muted text-[11px]">
+                  <Text className="font-body text-muted text-xs">
                     Memakai uang penjualan hari itu. Matikan jika dibayar lewat transfer atau sumber lain.
                   </Text>
                 </View>

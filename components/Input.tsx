@@ -36,14 +36,26 @@ export function Input({
         )}
         <TextInput
           accessibilityLabel={label}
-          className={`w-full min-h-12 bg-surface border ${
-            error ? 'border-primary' : 'border-line'
-          } rounded-input px-4 py-3 font-body text-base text-text ${
+          className={`w-full bg-surface border ${
+            error ? 'border-danger' : 'border-line-strong'
+          } rounded-input px-4 font-body text-text ${
             leftIcon ? 'pl-11' : ''
           } ${secureToggle ? 'pr-12' : ''} ${className || ''}`}
           placeholderTextColor="#6B7280"
           secureTextEntry={isHidden}
           {...props}
+          // Ukuran teks lewat style, bukan kelas text-base: kelas itu ikut memasang lineHeight 24,
+          // dan di Android TextInput ber-lineHeight memotong bagian atas/bawah huruf.
+          style={[
+            {
+              fontSize: 16,
+              minHeight: 48,
+              paddingVertical: props.multiline ? 12 : 0,
+              textAlignVertical: props.multiline ? 'top' : 'center',
+              includeFontPadding: false,
+            },
+            props.style,
+          ]}
         />
         {secureToggle && (
           <TouchableOpacity
@@ -62,7 +74,11 @@ export function Input({
         )}
       </View>
       {error ? (
-        <Text className="font-body text-primary text-xs mt-1.5">{error}</Text>
+        // Error tidak hanya lewat warna: ikon + teks, dan diumumkan ke pembaca layar.
+        <View className="flex-row items-start mt-1.5" accessibilityLiveRegion="polite" accessibilityRole="alert">
+          <Ionicons name="alert-circle" size={14} color="#991B1B" style={{ marginTop: 1, marginRight: 4 }} />
+          <Text className="font-body text-danger text-xs flex-1">{error}</Text>
+        </View>
       ) : hint ? (
         <Text className="font-body text-muted text-xs mt-1.5">{hint}</Text>
       ) : null}

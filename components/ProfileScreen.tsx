@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Alert, KeyboardAvoidingView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
@@ -86,7 +86,7 @@ export function ProfileScreen({ onOpenSidebar, backTo }: ProfileScreenProps) {
     <View className="flex-1 bg-background">
       <ScreenHeader title="Profil Saya" subtitle="Akun & Keamanan" onOpenSidebar={onOpenSidebar} backTo={backTo} />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
+      <KeyboardAvoidingView behavior="padding" className="flex-1">
         <ScrollView
           contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
           style={isTablet ? { maxWidth: 640, width: '100%', alignSelf: 'center' } : undefined}

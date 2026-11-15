@@ -370,18 +370,25 @@ describe('Integrasi layar', () => {
 
   it('produk habis (Tidak Tersedia) ter-disable di POS, tidak menawarkan aktifkan ulang lewat kartu', () => {
     const pos = read('app/(kasir)/pos.tsx');
-    expect(pos).toContain('disabled={isUnavailable}');
+    expect(pos).toMatch(/disabled(={|: )isUnavailable/);
     expect(pos).not.toContain("text: 'Jadikan Tersedia'");
   });
 
   it('detail produk: tahan untuk melihat, lepas untuk menutup', () => {
     const src = read('app/(customer)/product.tsx');
     expect(src).toContain('onLongPress={() => setPeekProduct(item)}');
-    expect(src).toContain('onPressOut={() => setPeekProduct(null)}');
+    expect(src).toContain('if (!peekSticky) setPeekProduct(null);');
     // overlay tidak boleh merebut sentuhan, agar "lepas" tetap tertangkap kartu
-    expect(src).toContain('pointerEvents="none"');
+    expect(src).toContain('pointerEvents={peekSticky ? "auto" : "none"}');
     expect(src).toContain('getProductDetailView(peekProduct)');
     expect(src).toContain('accessibilityHint=');
+  });
+
+  it('detail produk bisa dibuka & ditutup lewat pembaca layar', () => {
+    const src = read('app/(customer)/product.tsx');
+    expect(src).toContain('accessibilityActions={[{ name: "longpress"');
+    expect(src).toContain('setPeekSticky(true)');
+    expect(src).toContain('Tutup detail');
   });
 
   it('tipe database & komentar zona waktu', () => {

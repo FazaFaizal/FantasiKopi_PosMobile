@@ -1,6 +1,7 @@
 import React from "react";
 import { Text, TouchableOpacity, View, Platform, StatusBar } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
@@ -36,9 +37,11 @@ export function ScreenHeader({
 
   return (
     <View
-      className="bg-primary-dark px-4 pb-4 shadow-sm"
+      className="bg-primary-dark px-4 pb-4"
       style={{ paddingTop: topInset + 12 }}
     >
+      {/* Header merah tua digambar di belakang status bar: ikon sistem harus terang. */}
+      <ExpoStatusBar style="light" />
       <View className="flex-row items-center justify-between min-h-11">
         {/* Left Container: Icon Bar + Title & Subtitle (Sejajar Horisontal) */}
         <View className="flex-row items-center flex-1 mr-2">
@@ -97,7 +100,7 @@ export function ScreenHeader({
         <View className="flex-row items-center gap-2 flex-shrink-0">
           {showNetworkStatus && (
             <View
-              className={`flex-row items-center px-2 py-0.5 rounded-full border ${
+              className={`flex-row items-center px-2 py-0.5 rounded-chip border ${
                 isOnline
                   ? "bg-emerald-500/20 border-emerald-400/40"
                   : "bg-red-500/20 border-red-400/40"
@@ -110,7 +113,7 @@ export function ScreenHeader({
                   isOnline ? "bg-emerald-400" : "bg-red-400"
                 }`}
               />
-              <Text className="text-[10px] font-body-medium text-white">
+              <Text className="text-xs font-body-medium text-white">
                 {isOnline ? "Online" : "Offline"}
               </Text>
             </View>

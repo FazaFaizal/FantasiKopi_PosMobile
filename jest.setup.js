@@ -35,6 +35,11 @@ jest.mock("react-native-safe-area-context", () => ({
   SafeAreaProvider: ({ children }) => children,
 }));
 
+// Mock expo-status-bar (modul native, tidak tersedia di Jest)
+jest.mock("expo-status-bar", () => ({
+  StatusBar: () => null,
+}));
+
 // Mock vector icons
 jest.mock("@expo/vector-icons", () => {
   const React = require("react");

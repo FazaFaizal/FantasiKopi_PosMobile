@@ -37,6 +37,13 @@ describe('Password minimal 8 karakter', () => {
     expect(read('supabase/functions/create-staff-user/index.ts')).toContain('const PASSWORD_MIN_LENGTH = 8;');
   });
 
+  it('teks petunjuk password mengikuti batas yang sama (tidak ada sisa "6 karakter")', () => {
+    for (const f of ['app/(auth)/register.tsx', 'app/(auth)/login.tsx', 'app/(admin)/user.tsx', 'components/ProfileScreen.tsx']) {
+      expect(read(f)).not.toMatch(/[Mm]inimal 6 karakter/);
+    }
+    expect(read('app/(auth)/register.tsx')).toContain('PASSWORD_MIN_LENGTH');
+  });
+
   it('login TIDAK memvalidasi panjang password (pengguna lama tetap bisa masuk)', () => {
     expect(read('app/(auth)/login.tsx')).not.toMatch(/validatePassword\(|password\.length\s*</);
   });

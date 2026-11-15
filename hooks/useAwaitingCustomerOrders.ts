@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { OrderRecord, isAwaitingCustomerPayment } from '../lib/order-logic';
+import { INCOMING_ORDERS_FILTER, IncomingOrderRow } from '../lib/incoming-orders-logic';
+
+const INCOMING_COLUMNS =
+  'id, order_number, customer_name, total_amount, payment_method, payment_channel, order_status, payment_status, order_type, created_at, payment_due_at';
 
 export interface IncomingCustomerOrder {
   id: string;
@@ -19,12 +23,14 @@ const SWEEP_INTERVAL_MS = 30_000;
  * Pesanan customer yang menunggu dibayar di kasir (Kasir & Admin).
  * - `count`: jumlah pesanan yang menunggu pembayaran (badge sidebar).
  * - `latest`: pesanan baru yang masuk lewat realtime (banner notifikasi).
+ * - `incoming`: daftar pesanan customer yang perlu ditindaklanjuti (panel notifikasi POS).
  * Sekaligus menjalankan pembatalan otomatis pesanan yang melewati batas 15 menit,
  * sehingga tetap berjalan walaupun pg_cron belum aktif di Supabase.
  */
 export function useAwaitingCustomerOrders(enabled: boolean = true) {
   const [count, setCount] = useState(0);
   const [latest, setLatest] = useState<IncomingCustomerOrder | null>(null);
+  const [incoming, setIncoming] = useState<IncomingOrderRow[]>([]);
   const lastSweep = useRef(0);
   const channelName = useRef(`awaiting-customer-orders-${Math.random().toString(36).slice(2)}`);
 
@@ -42,6 +48,14 @@ export function useAwaitingCustomerOrders(enabled: boolean = true) {
       // Pesanan QRIS online menunggu pembayaran di Midtrans, bukan di kasir.
       .eq('payment_channel', 'Kasir');
     if (!error) setCount(total ?? 0);
+
+    const { data: rows, error: listError } = await supabase
+      .from('orders')
+      .select(INCOMING_COLUMNS)
+      .or(INCOMING_ORDERS_FILTER)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (!listError) setIncoming((rows as unknown as IncomingOrderRow[]) || []);
   }, [enabled]);
 
   useEffect(() => {
@@ -93,5 +107,5 @@ export function useAwaitingCustomerOrders(enabled: boolean = true) {
   // Stabil antar render agar timer auto-hide banner tidak ter-reset.
   const dismissLatest = useCallback(() => setLatest(null), []);
 
-  return { count, latest, dismissLatest, refresh };
+  return { count, latest, incoming, dismissLatest, refresh };
 }

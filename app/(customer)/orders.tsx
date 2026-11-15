@@ -254,19 +254,19 @@ export default function CustomerOrdersScreen() {
       <View
         accessibilityLiveRegion="polite"
         className={`rounded-card p-3 mb-2 border flex-row items-center ${
-          expired ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"
+          expired ? "bg-danger-soft border-danger/30" : "bg-warning-soft border-warning/30"
         }`}
       >
-        <Ionicons name={expired ? "alert-circle" : "time-outline"} size={20} color={expired ? "#DC2626" : "#B45309"} />
+        <Ionicons name={expired ? "alert-circle" : "time-outline"} size={20} color={expired ? "#991B1B" : "#B45309"} />
         <View className="ml-2 flex-1">
-          <Text className={`font-heading-semibold text-xs ${expired ? "text-danger" : "text-amber-800"}`}>
+          <Text className={`font-heading-semibold text-xs ${expired ? "text-danger" : "text-warning"}`}>
             {expired
               ? "Batas bayar habis"
               : online
               ? `Selesaikan pembayaran QRIS sebelum ${dueTime}`
               : `Bayar di kasir sebelum ${dueTime}`}
           </Text>
-          <Text className={`font-body text-[11px] ${expired ? "text-red-700" : "text-amber-800"}`}>
+          <Text className={`font-body text-xs ${expired ? "text-danger" : "text-warning"}`}>
             {expired
               ? "Pesanan dibatalkan otomatis. Silakan pesan kembali."
               : `Sisa waktu ${formatCountdown(left)} · lewat ${limitMinutes} menit pesanan dibatalkan otomatis.`}
@@ -295,13 +295,13 @@ export default function CustomerOrdersScreen() {
     if (status === "Cancelled") {
       const cancellation = describeCancellation(order, userId);
       return (
-        <View className="bg-red-50 border border-red-200 rounded-card p-3 my-2 flex-row items-center">
-          <Ionicons name="close-circle" size={20} color="#DC2626" />
+        <View className="bg-danger-soft border border-danger/30 rounded-card p-3 my-2 flex-row items-center">
+          <Ionicons name="close-circle" size={20} color="#991B1B" />
           <View className="ml-2 flex-1">
             <Text className="font-heading-semibold text-danger text-xs">
               {cancellation.title}
             </Text>
-            <Text className="font-body text-red-700 text-[11px]">
+            <Text className="font-body text-danger text-xs">
               {cancellation.detail}
             </Text>
           </View>
@@ -333,7 +333,7 @@ export default function CustomerOrdersScreen() {
                     isCurrent
                       ? "bg-primary border-primary"
                       : isCompleted
-                      ? "bg-emerald-600 border-emerald-600"
+                      ? "bg-success border-success"
                       : "bg-surface border-line"
                   }`}
                 >
@@ -341,7 +341,7 @@ export default function CustomerOrdersScreen() {
                     <Ionicons name="checkmark" size={12} color="#FFFFFF" />
                   ) : (
                     <Text
-                      className={`text-[10px] font-heading-bold ${
+                      className={`text-xs font-heading ${
                         isCurrent ? "text-white" : "text-muted"
                       }`}
                     >
@@ -350,7 +350,7 @@ export default function CustomerOrdersScreen() {
                   )}
                 </View>
                 <Text
-                  className={`text-[10px] mt-1 ${
+                  className={`text-xs mt-1 ${
                     isCurrent
                       ? "font-heading-semibold text-primary"
                       : isCompleted
@@ -380,11 +380,11 @@ export default function CustomerOrdersScreen() {
     const meta = getCustomerOrderStatusMeta(item.order_status);
 
     return (
-      <View className="bg-surface rounded-card p-4 mb-3 border border-line shadow-sm">
+      <View className="bg-surface rounded-card p-4 mb-3 border border-line">
         {/* Order Header */}
         <View className="flex-row justify-between items-start mb-2">
           <View className="flex-1 mr-2">
-            <Text className="font-heading-bold text-text text-sm">
+            <Text className="font-heading text-text text-sm">
               {item.order_number}
             </Text>
             <Text className="font-body text-muted text-xs mt-0.5">
@@ -428,8 +428,8 @@ export default function CustomerOrdersScreen() {
         {/* Order Footer with Total & Detail Action */}
         <View className="pt-3 border-t border-line flex-row justify-between items-center mt-1">
           <View>
-            <Text className="font-body text-muted text-[11px]">Total Tagihan</Text>
-            <Text className="font-heading-bold text-primary text-base">
+            <Text className="font-body text-muted text-xs">Total Tagihan</Text>
+            <Text className="font-heading text-primary text-base">
               {formatRupiah(item.total_amount)}
             </Text>
           </View>
@@ -474,7 +474,7 @@ export default function CustomerOrdersScreen() {
         className="px-4 pt-3 pb-2"
         style={isTablet ? { maxWidth: 800, width: "100%", alignSelf: "center" } : undefined}
       >
-        <View className="flex-row bg-surface rounded-card p-1 border border-line shadow-sm">
+        <View className="flex-row bg-surface rounded-card p-1 border border-line">
           <TouchableOpacity
             onPress={() => setActiveTab("active")}
             activeOpacity={0.8}
@@ -580,11 +580,11 @@ export default function CustomerOrdersScreen() {
         }}
       >
         <View className="flex-1 bg-black/50 justify-center items-center p-4">
-          <View className="bg-surface rounded-card p-5 w-full max-w-md border border-line shadow-2xl max-h-[85%]">
+          <View className="bg-surface rounded-card p-5 w-full max-w-md border border-line shadow-xl max-h-[85%]">
             {/* Header Modal */}
             <View className="flex-row justify-between items-center pb-3 border-b border-line mb-3">
               <View>
-                <Text className="font-heading-bold text-text text-base">
+                <Text className="font-heading text-text text-base">
                   Nota Pesanan
                 </Text>
                 <Text className="font-body text-primary text-xs">
@@ -635,7 +635,7 @@ export default function CustomerOrdersScreen() {
 
                 {selectedOrder?.notes && (
                   <View className="mt-1 pt-1 border-t border-line/60">
-                    <Text className="font-body text-muted text-[11px]">
+                    <Text className="font-body text-muted text-xs">
                       Catatan: {selectedOrder.notes}
                     </Text>
                   </View>
@@ -662,12 +662,12 @@ export default function CustomerOrdersScreen() {
                         </Text>
                       </View>
                       <View className="flex-row justify-between mt-0.5">
-                        <Text className="font-body text-muted text-[11px]">
+                        <Text className="font-body text-muted text-xs">
                           {item.quantity} x {formatRupiah(item.unit_price)}
                         </Text>
                       </View>
                       {item.notes && (
-                        <Text className="text-[11px] text-amber-700 font-body mt-0.5">
+                        <Text className="text-xs text-warning font-body mt-0.5">
                           • {item.notes}
                         </Text>
                       )}
@@ -683,10 +683,10 @@ export default function CustomerOrdersScreen() {
               {/* Total Calculation */}
               <View className="bg-background rounded-card p-3 border border-line mb-4">
                 <View className="flex-row justify-between items-center">
-                  <Text className="font-heading-bold text-text text-sm">
+                  <Text className="font-heading text-text text-sm">
                     Total Pembayaran
                   </Text>
-                  <Text className="font-heading-bold text-primary text-base">
+                  <Text className="font-heading text-primary text-base">
                     {selectedOrder ? formatRupiah(selectedOrder.total_amount) : "Rp 0"}
                   </Text>
                 </View>
@@ -695,15 +695,15 @@ export default function CustomerOrdersScreen() {
 
             {selectedOrder && canCustomerCancelOrder(selectedOrder).allowed && (
               cancelMode ? (
-                <View className="mt-2 bg-rose-50 border border-rose-200 rounded-card p-3">
-                  <Text className="font-heading-semibold text-rose-700 text-xs mb-1.5">Alasan pembatalan</Text>
+                <View className="mt-2 bg-danger-soft border border-danger/30 rounded-card p-3">
+                  <Text className="font-heading-semibold text-danger text-xs mb-1.5">Alasan pembatalan</Text>
                   <TextInput
                     accessibilityLabel="Alasan pembatalan pesanan"
                     value={cancelReason}
                     onChangeText={setCancelReason}
                     placeholder="Contoh: Salah pilih menu"
-                    placeholderTextColor="#9CA3AF"
-                    className="bg-surface border border-line rounded-chip px-3 py-2 font-body text-text text-sm mb-2"
+                    placeholderTextColor="#6B7280"
+                    className="bg-surface border border-line-strong rounded-chip min-h-11 px-3 py-2 font-body text-text text-sm mb-2"
                   />
                   <View className="flex-row gap-2">
                     <TouchableOpacity
@@ -718,7 +718,7 @@ export default function CustomerOrdersScreen() {
                       accessibilityLabel="Konfirmasi batalkan pesanan"
                       onPress={handleCancelOrder}
                       disabled={cancelling}
-                      className="flex-1 min-h-11 bg-rose-600 rounded-chip items-center justify-center"
+                      className="flex-1 min-h-11 bg-danger rounded-chip items-center justify-center"
                     >
                       <Text className="font-heading-semibold text-white text-xs">
                         {cancelling ? "Membatalkan..." : "Ya, Batalkan"}
@@ -731,10 +731,10 @@ export default function CustomerOrdersScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Batalkan pesanan ini"
                   onPress={() => setCancelMode(true)}
-                  className="mt-2 min-h-11 border border-rose-300 bg-rose-50 rounded-chip items-center justify-center flex-row"
+                  className="mt-2 min-h-11 border border-danger/30 bg-danger-soft rounded-chip items-center justify-center flex-row"
                 >
-                  <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
-                  <Text className="font-heading-semibold text-rose-700 text-xs ml-1.5">
+                  <Ionicons name="close-circle-outline" size={16} color="#991B1B" />
+                  <Text className="font-heading-semibold text-danger text-xs ml-1.5">
                     Batalkan Pesanan (belum dibayar)
                   </Text>
                 </TouchableOpacity>

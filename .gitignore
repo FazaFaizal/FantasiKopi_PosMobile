@@ -73,9 +73,10 @@ Thumbs.db
 STRUKTUR_PROYEK_MVC.md
 .prd
 AGENTS.md
+CLAUDE.md
 skills-lock.json
-# Izin Claude Code & koneksi MCP khusus komputer ini (jangan dibagikan)
-.claude/settings.local.json
+# Claude Code: skill terpasang (.claude/skills) & izin khusus komputer ini, serta koneksi MCP (jangan dibagikan)
+.claude/
 .mcp.json
 
 # Temporary artifacts

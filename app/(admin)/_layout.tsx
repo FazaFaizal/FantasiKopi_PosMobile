@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import { Tabs, useRouter, usePathname } from "expo-router";
-import LayoutDashboard from "lucide-react-native/icons/layout-dashboard";
-import Coffee from "lucide-react-native/icons/coffee";
-import Package from "lucide-react-native/icons/package";
+import { Ionicons } from "@expo/vector-icons";
 import { FloatingTabBar } from "../../components/FloatingNavbar";
 import { SidebarDrawer, AdminSidebarContext } from "../../components/SidebarDrawer";
 import { useAuth } from "../../lib/AuthContext";
@@ -34,21 +32,21 @@ export default function AdminLayout() {
           name="dashboard"
           options={{
             title: "Dashboard",
-            tabBarIcon: ({ color, size }) => <LayoutDashboard size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => <Ionicons name="grid-outline" size={size} color={color as string} />,
           }}
         />
         <Tabs.Screen
           name="product"
           options={{
             title: "Produk",
-            tabBarIcon: ({ color, size }) => <Coffee size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => <Ionicons name="cafe-outline" size={size} color={color as string} />,
           }}
         />
         <Tabs.Screen
           name="inventory"
           options={{
             title: "Bahan Baku",
-            tabBarIcon: ({ color, size }) => <Package size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => <Ionicons name="cube-outline" size={size} color={color as string} />,
           }}
         />
         <Tabs.Screen

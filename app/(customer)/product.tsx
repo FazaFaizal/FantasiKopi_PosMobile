@@ -11,7 +11,6 @@ import {
   Modal,
   ScrollView,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
 } from "react-native";
 import { Badge } from "../../components/Badge";
@@ -22,6 +21,8 @@ import { supabase } from "../../lib/supabase";
 import { Category, Product } from "../../types/database";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import { formatRupiah } from "../../lib/formatters";
 import { useRouter } from "expo-router";
 import {
@@ -56,6 +57,7 @@ export default function CustomerProduct() {
   const { user } = useAuth();
   const router = useRouter();
   const { isTablet, columns } = useResponsive();
+  const insets = useSafeAreaInsets();
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<ProductWithCategory[]>([]);
@@ -68,6 +70,7 @@ export default function CustomerProduct() {
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   // Detail menu yang sedang ditahan (tampil selama jari menekan kartu)
   const [peekProduct, setPeekProduct] = useState<ProductWithCategory | null>(null);
+  const [peekSticky, setPeekSticky] = useState(false);
 
   // Cart & Checkout States
   const [cart, setCart] = useState<CustomerCartItem[]>([]);
@@ -403,10 +406,19 @@ export default function CustomerProduct() {
       // Tahan kartu untuk melihat detail menu; lepas untuk menutup (PRD 25: Product Detail).
       <Pressable
         onLongPress={() => setPeekProduct(item)}
-        onPressOut={() => setPeekProduct(null)}
+        onPressOut={() => {
+          if (!peekSticky) setPeekProduct(null);
+        }}
         delayLongPress={300}
         accessibilityHint="Tahan untuk melihat detail menu"
-        className={`bg-surface rounded-card p-4 mb-3 border border-line shadow-sm flex-row items-center ${
+        accessibilityActions={[{ name: "longpress", label: "Lihat detail menu" }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === "longpress") {
+            setPeekSticky(true);
+            setPeekProduct(item);
+          }
+        }}
+        className={`bg-surface rounded-card p-4 mb-3 border border-line flex-row items-center ${
           !isAvailable ? "opacity-70" : ""
         }`}
         style={columns > 1 ? { flex: 1 } : undefined}
@@ -432,13 +444,13 @@ export default function CustomerProduct() {
                   : "cafe-outline"
               }
               size={32}
-              color={isAvailable ? "#D1001F" : "#9CA3AF"}
+              color={isAvailable ? "#D1001F" : "#6B7280"}
             />
           )}
 
           {itemInCartCount > 0 && (
             <View className="absolute top-1 right-1 bg-primary rounded-full px-1.5 py-0.5">
-              <Text className="text-[10px] font-heading-bold text-white">
+              <Text className="text-xs font-heading text-white">
                 {itemInCartCount}x
               </Text>
             </View>
@@ -472,7 +484,7 @@ export default function CustomerProduct() {
           ) : null}
 
           <View className="flex-row items-center justify-between mt-1">
-            <Text className="font-heading-bold text-primary text-base">
+            <Text className="font-heading text-primary text-base">
               {formatRupiah(item.price)}
             </Text>
 
@@ -480,7 +492,7 @@ export default function CustomerProduct() {
               <TouchableOpacity
                 onPress={() => handleInitiateAddToCart(item)}
                 activeOpacity={0.8}
-                className="flex-row items-center bg-primary px-3 py-1.5 rounded-chip"
+                className="flex-row items-center bg-primary px-3 min-h-11 rounded-chip"
                 accessibilityRole="button"
                 accessibilityLabel={`Tambah ${item.name} ke keranjang`}
               >
@@ -508,10 +520,12 @@ export default function CustomerProduct() {
     return (
       // pointerEvents="none": overlay tidak merebut sentuhan, sehingga saat jari dilepas
       // kartu menu tetap menerima onPressOut dan detail langsung tertutup.
+      // Dibuka lewat aksi pembaca layar (bukan jari): overlay menerima sentuhan agar bisa ditutup.
       <View
-        pointerEvents="none"
+        pointerEvents={peekSticky ? "auto" : "none"}
         style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 40 }}
         className="bg-black/50 items-center justify-center px-6"
+        accessibilityViewIsModal={peekSticky}
       >
         <View className="bg-surface rounded-card w-full max-w-sm overflow-hidden border border-line shadow-xl">
           <View className="w-full h-56 bg-primary/10 items-center justify-center">
@@ -523,18 +537,31 @@ export default function CustomerProduct() {
           </View>
           <View className="p-4">
             <View className="flex-row items-start justify-between mb-1">
-              <Text className="font-heading-bold text-text text-lg flex-1 mr-2">{peekProduct.name}</Text>
+              <Text className="font-heading text-text text-lg flex-1 mr-2">{peekProduct.name}</Text>
               <Badge label={detail.statusLabel} tone={detail.tone} />
             </View>
             {peekProduct.category ? (
               <Text className="font-body text-muted text-xs mb-2">{peekProduct.category.name}</Text>
             ) : null}
-            <Text className="font-heading-bold text-primary text-xl mb-2">{formatRupiah(peekProduct.price)}</Text>
+            <Text className="font-heading text-primary text-xl mb-2">{formatRupiah(peekProduct.price)}</Text>
             <Text className="font-body text-text text-sm leading-5">{detail.description}</Text>
             {!detail.canOrder ? (
               <Text className="font-body text-danger text-xs mt-2">Menu ini sedang habis dan belum dapat dipesan.</Text>
             ) : null}
-            <Text className="font-body text-muted text-[11px] text-center mt-3">Lepaskan untuk menutup</Text>
+            {peekSticky ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={() => {
+                  setPeekSticky(false);
+                  setPeekProduct(null);
+                }}
+                className="mt-3 min-h-11 items-center justify-center rounded-chip border border-line"
+              >
+                <Text className="font-body-medium text-text text-sm">Tutup detail</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text className="font-body text-muted text-xs text-center mt-3">Lepaskan untuk menutup</Text>
+            )}
           </View>
         </View>
       </View>
@@ -552,7 +579,7 @@ export default function CustomerProduct() {
               accessibilityRole="button"
               accessibilityLabel="Buka riwayat pesanan saya"
               onPress={() => router.push("/(customer)/orders")}
-              className="flex-row items-center bg-white/20 px-3 py-1.5 rounded-chip"
+              className="flex-row items-center bg-white/20 px-3 min-h-11 rounded-chip"
             >
               <Ionicons name="receipt-outline" size={16} color="#FFFFFF" />
               <Text className="font-body-medium text-white text-xs ml-1.5">
@@ -572,32 +599,18 @@ export default function CustomerProduct() {
         }
       />
 
-      {/* Customer Header Info */}
-      <View className="bg-surface px-4 py-3 border-b border-line flex-row items-center justify-between">
-        <View className="flex-row items-center flex-1 mr-2">
-          <Ionicons name="person-circle-outline" size={20} color="#D1001F" />
-          <Text
-            className="font-body-medium text-text text-xs ml-1.5"
-            numberOfLines={1}
-          >
-            {user?.email}
-          </Text>
-        </View>
-        <Badge label="Pelanggan" tone="accent" />
-      </View>
-
       {/* Search Input */}
       <View
         className="p-4 pb-2"
         style={isTablet ? { maxWidth: 1200, width: "100%", alignSelf: "center" } : undefined}
       >
-        <View className="flex-row items-center bg-surface border border-line rounded-card px-3.5 py-2.5 shadow-sm">
+        <View className="flex-row items-center bg-surface border border-line-strong rounded-card px-3.5 py-2.5">
           <Ionicons name="search-outline" size={18} color="#6B7280" />
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Cari kopi, makanan, atau minuman..."
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor="#6B7280"
             className="flex-1 ml-2 font-body text-text text-sm py-0"
             accessibilityLabel="Input pencarian menu"
           />
@@ -606,9 +619,10 @@ export default function CustomerProduct() {
               onPress={() => setSearchQuery("")}
               accessibilityRole="button"
               accessibilityLabel="Hapus pencarian"
+              hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
               className="p-1"
             >
-              <Ionicons name="close-circle" size={16} color="#9CA3AF" />
+              <Ionicons name="close-circle" size={16} color="#6B7280" />
             </TouchableOpacity>
           )}
         </View>
@@ -629,9 +643,11 @@ export default function CustomerProduct() {
             const isSelected = selectedCategoryId === item.id;
             return (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
                 onPress={() => setSelectedCategoryId(item.id)}
                 activeOpacity={0.7}
-                className={`px-4 py-2 rounded-chip border ${
+                className={`px-4 min-h-11 justify-center rounded-chip border ${
                   isSelected
                     ? "bg-primary border-primary"
                     : "bg-surface border-line"
@@ -684,7 +700,7 @@ export default function CustomerProduct() {
                 Daftar Menu ({filteredProducts.length})
               </Text>
               <Text className="font-body text-muted text-xs">
-                Ketersediaan menu terupdate
+                Tarik ke bawah untuk memperbarui
               </Text>
             </View>
           }
@@ -709,14 +725,19 @@ export default function CustomerProduct() {
 
       {/* Floating Cart Capsule Bar */}
       {cart.length > 0 && (
-        <View className="absolute bottom-5 left-4 right-4 items-center">
+        <View
+          className="absolute left-4 right-4 items-center"
+          style={{ bottom: Math.max(insets.bottom, 20) }}
+        >
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Buka keranjang, ${cartTotals.totalItems} item, ${formatRupiah(cartTotals.total)}`}
             onPress={() => {
               setCartModalVisible(true);
               refreshBlockingOrder();
             }}
             activeOpacity={0.9}
-            className="bg-primary flex-row items-center justify-between px-5 py-3.5 rounded-full shadow-lg border border-red-700 w-full max-w-lg"
+            className="bg-primary flex-row items-center justify-between px-5 py-3.5 rounded-card shadow-lg border border-primary-dark w-full max-w-lg"
           >
             <View className="flex-row items-center">
               <View className="bg-white/20 w-8 h-8 rounded-full items-center justify-center mr-3">
@@ -726,13 +747,13 @@ export default function CustomerProduct() {
                 <Text className="text-white text-xs font-body">
                   {cartTotals.totalItems} Item di Keranjang
                 </Text>
-                <Text className="text-white text-base font-heading-bold">
+                <Text className="text-white text-base font-heading">
                   {formatRupiah(cartTotals.total)}
                 </Text>
               </View>
             </View>
 
-            <View className="flex-row items-center bg-white px-3.5 py-1.5 rounded-full">
+            <View className="flex-row items-center bg-white px-3.5 py-1.5 rounded-chip">
               <Text className="text-primary font-heading-semibold text-xs mr-1">
                 Buka Keranjang
               </Text>
@@ -755,7 +776,12 @@ export default function CustomerProduct() {
               <Text className="font-heading-semibold text-text text-base">
                 Catatan Pesanan
               </Text>
-              <TouchableOpacity onPress={() => setNoteModalVisible(false)}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Tutup catatan pesanan"
+                onPress={() => setNoteModalVisible(false)}
+                className="w-11 h-11 -mr-2 items-center justify-center"
+              >
                 <Ionicons name="close" size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
@@ -771,16 +797,17 @@ export default function CustomerProduct() {
               value={itemNoteInput}
               onChangeText={setItemNoteInput}
               placeholder="Contoh: Less ice, less sweet, oat milk..."
-              placeholderTextColor="#9CA3AF"
-              className="bg-background border border-line rounded-chip px-3 py-2.5 font-body text-text text-sm mb-4"
+              placeholderTextColor="#6B7280"
+              className="bg-background border border-line-strong rounded-chip px-3 py-2.5 font-body text-text text-sm mb-4"
               multiline
               numberOfLines={3}
             />
 
             <View className="flex-row gap-2">
               <TouchableOpacity
+                accessibilityRole="button"
                 onPress={() => setNoteModalVisible(false)}
-                className="flex-1 bg-surface border border-line py-2.5 rounded-chip items-center"
+                className="flex-1 bg-surface border border-line min-h-12 justify-center rounded-chip items-center"
               >
                 <Text className="font-body-medium text-muted text-xs">
                   Batal
@@ -788,8 +815,9 @@ export default function CustomerProduct() {
               </TouchableOpacity>
 
               <TouchableOpacity
+                accessibilityRole="button"
                 onPress={handleConfirmAddToCart}
-                className="flex-1 bg-primary py-2.5 rounded-chip items-center"
+                className="flex-1 bg-primary min-h-12 justify-center rounded-chip items-center"
               >
                 <Text className="font-body-semibold text-white text-xs">
                   Tambahkan (+1)
@@ -807,20 +835,26 @@ export default function CustomerProduct() {
         onRequestClose={() => setCartModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
           className="flex-1 bg-background"
         >
           {/* Header Modal */}
-          <View className="bg-primary px-5 py-4 flex-row items-center justify-between">
+          <StatusBar style="light" />
+          <View
+            className="bg-primary px-5 pb-3 flex-row items-center justify-between"
+            style={{ paddingTop: insets.top + 12 }}
+          >
             <View className="flex-row items-center">
               <Ionicons name="cart" size={22} color="#FFFFFF" />
-              <Text className="font-heading-bold text-white text-lg ml-2">
+              <Text className="font-heading text-white text-lg ml-2">
                 Keranjang & Checkout
               </Text>
             </View>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Tutup keranjang"
               onPress={() => setCartModalVisible(false)}
-              className="p-1"
+              className="w-11 h-11 -mr-2 items-center justify-center"
             >
               <Ionicons name="close" size={24} color="#FFFFFF" />
             </TouchableOpacity>
@@ -836,8 +870,13 @@ export default function CustomerProduct() {
                 Daftar Pesanan ({cart.length})
               </Text>
               {cart.length > 0 && (
-                <TouchableOpacity onPress={handleClearCart}>
-                  <Text className="font-body text-danger text-xs">
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Kosongkan keranjang"
+                  onPress={handleClearCart}
+                  className="min-h-11 px-2 justify-center"
+                >
+                  <Text className="font-body-medium text-danger text-xs">
                     Kosongkan
                   </Text>
                 </TouchableOpacity>
@@ -850,7 +889,7 @@ export default function CustomerProduct() {
                 description="Belum ada menu yang Anda pilih."
               />
             ) : (
-              <View className="bg-surface rounded-card border border-line p-3 mb-5 shadow-sm divide-y divide-line">
+              <View className="bg-surface rounded-card border border-line p-3 mb-5 divide-y divide-line">
                 {cart.map((item, idx) => (
                   <View key={`${item.productId}-${idx}`} className="py-3">
                     <View className="flex-row justify-between items-start">
@@ -862,8 +901,8 @@ export default function CustomerProduct() {
                           {formatRupiah(item.unitPrice)}
                         </Text>
                         {item.notes ? (
-                          <View className="bg-amber-50 rounded px-2 py-0.5 mt-1 self-start border border-amber-200">
-                            <Text className="text-[11px] text-amber-800 font-body">
+                          <View className="bg-warning-soft rounded px-2 py-0.5 mt-1 self-start border border-warning/30">
+                            <Text className="text-xs text-warning font-body">
                               Catatan: {item.notes}
                             </Text>
                           </View>
@@ -902,12 +941,14 @@ export default function CustomerProduct() {
 
                     <View className="flex-row justify-between items-center mt-2 pt-2 border-t border-line/60">
                       <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`Hapus ${item.productName} dari keranjang`}
                         onPress={() =>
                           handleRemoveItem(item.productId, item.notes)
                         }
-                        className="flex-row items-center"
+                        className="flex-row items-center min-h-11 pr-3"
                       >
-                        <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                        <Ionicons name="trash-outline" size={14} color="#991B1B" />
                         <Text className="text-danger font-body text-xs ml-1">
                           Hapus
                         </Text>
@@ -929,15 +970,17 @@ export default function CustomerProduct() {
                   Detail Pemesanan
                 </Text>
 
-                <View className="bg-surface rounded-card border border-line p-4 mb-5 shadow-sm">
+                <View className="bg-surface rounded-card border border-line p-4 mb-5">
                   {/* Tipe Pesanan: Dine In vs Take Away */}
                   <Text className="font-body-medium text-text text-xs mb-1.5">
                     Tipe Pesanan
                   </Text>
                   <View className="flex-row gap-2 mb-3.5">
                     <TouchableOpacity
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: orderType === "Dine In" }}
                       onPress={() => setOrderType("Dine In")}
-                      className={`flex-1 py-2.5 rounded-chip border items-center flex-row justify-center ${
+                      className={`flex-1 min-h-12 px-2 rounded-chip border items-center flex-row justify-center ${
                         orderType === "Dine In"
                           ? "bg-primary border-primary"
                           : "bg-surface border-line"
@@ -960,8 +1003,10 @@ export default function CustomerProduct() {
                     </TouchableOpacity>
 
                     <TouchableOpacity
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: orderType === "Take Away" }}
                       onPress={() => setOrderType("Take Away")}
-                      className={`flex-1 py-2.5 rounded-chip border items-center flex-row justify-center ${
+                      className={`flex-1 min-h-12 px-2 rounded-chip border items-center flex-row justify-center ${
                         orderType === "Take Away"
                           ? "bg-primary border-primary"
                           : "bg-surface border-line"
@@ -994,8 +1039,8 @@ export default function CustomerProduct() {
                         value={tableNumber}
                         onChangeText={setTableNumber}
                         placeholder="Contoh: Meja 05 atau Meja Bar"
-                        placeholderTextColor="#9CA3AF"
-                        className="bg-background border border-line rounded-chip px-3 py-2 font-body text-text text-sm"
+                        placeholderTextColor="#6B7280"
+                        className="bg-background border border-line-strong rounded-chip min-h-11 px-3 py-2 font-body text-text text-sm"
                       />
                     </View>
                   )}
@@ -1009,8 +1054,8 @@ export default function CustomerProduct() {
                       value={customerName}
                       onChangeText={setCustomerName}
                       placeholder="Masukkan nama Anda..."
-                      placeholderTextColor="#9CA3AF"
-                      className="bg-background border border-line rounded-chip px-3 py-2 font-body text-text text-sm"
+                      placeholderTextColor="#6B7280"
+                      className="bg-background border border-line-strong rounded-chip min-h-11 px-3 py-2 font-body text-text text-sm"
                     />
                   </View>
 
@@ -1040,18 +1085,18 @@ export default function CustomerProduct() {
                             <Text className={`text-xs ${selected ? "font-heading-semibold text-primary" : "font-body-medium text-text"}`}>
                               {option.label}
                             </Text>
-                            <Text className="font-body text-muted text-[11px]">{option.description}</Text>
+                            <Text className="font-body text-muted text-xs">{option.description}</Text>
                           </View>
                           <Ionicons
                             name={selected ? "radio-button-on" : "radio-button-off"}
                             size={18}
-                            color={selected ? "#D1001F" : "#9CA3AF"}
+                            color={selected ? "#D1001F" : "#6B7280"}
                           />
                         </TouchableOpacity>
                       );
                     })}
                   </View>
-                  <Text className="font-body text-muted text-[11px] mb-3">
+                  <Text className="font-body text-muted text-xs mb-3">
                     {paymentOption.channel === "Online"
                       ? `Selesaikan pembayaran QRIS dalam ${ONLINE_PAYMENT_TIMEOUT_MINUTES} menit; pesanan langsung disiapkan setelah lunas.`
                       : `Bayar di kasir dalam ${CUSTOMER_PAYMENT_TIMEOUT_MINUTES} menit; pesanan disiapkan setelah kasir mengonfirmasi pembayaran.`}
@@ -1066,8 +1111,8 @@ export default function CustomerProduct() {
                       value={orderNotes}
                       onChangeText={setOrderNotes}
                       placeholder="Contoh: Tolong sediakan sedotan kertas..."
-                      placeholderTextColor="#9CA3AF"
-                      className="bg-background border border-line rounded-chip px-3 py-2 font-body text-text text-sm"
+                      placeholderTextColor="#6B7280"
+                      className="bg-background border border-line-strong rounded-chip px-3 py-2 font-body text-text text-sm"
                       multiline
                       numberOfLines={2}
                     />
@@ -1075,11 +1120,11 @@ export default function CustomerProduct() {
                 </View>
 
                 {/* Section 3: Ringkasan Biaya & Konfirmasi */}
-                <View className="bg-surface rounded-card border border-line p-4 mb-5 shadow-sm">
+                <View className="bg-surface rounded-card border border-line p-4 mb-5">
                   <Text className="font-heading-semibold text-text text-sm mb-3">
                     Ringkasan Tagihan
                   </Text>
-                  <View className="flex-row justify-between mb-1.5">
+                  <View className="flex-row justify-between mb-3">
                     <Text className="font-body text-muted text-xs">
                       Subtotal ({cartTotals.totalItems} item)
                     </Text>
@@ -1087,30 +1132,22 @@ export default function CustomerProduct() {
                       {formatRupiah(cartTotals.subtotal)}
                     </Text>
                   </View>
-                  <View className="flex-row justify-between mb-3">
-                    <Text className="font-body text-muted text-xs">
-                      Pajak & Layanan
-                    </Text>
-                    <Text className="font-body text-success text-xs">
-                      Termasuk
-                    </Text>
-                  </View>
                   <View className="pt-2 border-t border-line flex-row justify-between items-center">
                     <Text className="font-heading-semibold text-text text-base">
                       Total Pembayaran
                     </Text>
-                    <Text className="font-heading-bold text-primary text-xl">
+                    <Text className="font-heading text-primary text-xl">
                       {formatRupiah(cartTotals.total)}
                     </Text>
                   </View>
                 </View>
 
                 {blockingOrder && (
-                  <View className="bg-amber-50 border border-amber-200 rounded-card p-3 mb-3">
-                    <Text className="font-heading-semibold text-amber-800 text-xs">
+                  <View className="bg-warning-soft border border-warning/30 rounded-card p-3 mb-3">
+                    <Text className="font-heading-semibold text-warning text-xs">
                       Pesanan {blockingOrder.order_number} belum dibayar
                     </Text>
-                    <Text className="font-body text-amber-800 text-[11px] mt-0.5">
+                    <Text className="font-body text-warning text-xs mt-0.5">
                       Satu akun hanya boleh punya {CUSTOMER_MAX_UNPAID_ORDERS} pesanan yang belum dibayar. Bayar di kasir atau
                       batalkan pesanan tersebut dulu.
                     </Text>
@@ -1118,15 +1155,16 @@ export default function CustomerProduct() {
                 )}
 
                 <TouchableOpacity
+                  accessibilityRole="button"
                   onPress={handleSubmitOrder}
                   disabled={submittingOrder || !!blockingOrder}
                   accessibilityState={{ disabled: submittingOrder || !!blockingOrder }}
                   activeOpacity={0.8}
-                  className={`bg-primary py-3.5 rounded-card items-center justify-center shadow-md ${
+                  className={`bg-primary py-3.5 rounded-card items-center justify-center ${
                     submittingOrder || blockingOrder ? "opacity-60" : ""
                   }`}
                 >
-                  <Text className="font-heading-bold text-white text-base">
+                  <Text className="font-heading text-white text-base">
                     {submittingOrder
                       ? "Memproses Pesanan..."
                       : paymentOption.channel === "Online"

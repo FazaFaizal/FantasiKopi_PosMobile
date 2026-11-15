@@ -10,7 +10,6 @@ import {
   TextInput,
   Image,
   KeyboardAvoidingView,
-  Platform,
   Keyboard,
 } from "react-native";
 import { supabase } from "../../lib/supabase";
@@ -24,6 +23,7 @@ import { useAdminSidebar } from "../../components/SidebarDrawer";
 import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
+import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 import { formatRupiah } from "../../lib/formatters";
 
 type Product = Database["public"]["Tables"]["products"]["Row"];
@@ -36,6 +36,7 @@ interface ProductWithCategory extends Product {
 export default function AdminProductScreen() {
   const { openSidebar } = useAdminSidebar();
   const { isTablet, columns } = useResponsive();
+  const sheetPadBottom = useSheetBottomPadding(24);
   const [products, setProducts] = useState<ProductWithCategory[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,7 +284,7 @@ export default function AdminProductScreen() {
 
     return (
       <View
-        className="bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm justify-between"
+        className="bg-surface rounded-card p-4 mb-3.5 border border-line justify-between"
         style={columns > 1 ? { flex: 1 } : undefined}
       >
         <View>
@@ -371,7 +372,7 @@ export default function AdminProductScreen() {
             onPress={() => handleToggleAvailability(item)}
             className={`min-h-10 px-3 py-1.5 rounded-button border flex-row items-center ${
               isAvailable
-                ? "bg-amber-500/10 border-amber-500/30"
+                ? "bg-warning-soft border-warning/30"
                 : "bg-success-soft border-success/30"
             }`}
           >
@@ -386,7 +387,7 @@ export default function AdminProductScreen() {
             />
             <Text
               className={`font-heading-semibold text-xs ml-1.5 ${
-                isAvailable ? "text-amber-800" : "text-success"
+                isAvailable ? "text-warning" : "text-success"
               }`}
             >
               {isAvailable ? "Set Habis" : "Set Tersedia"}
@@ -435,7 +436,7 @@ export default function AdminProductScreen() {
       >
         {/* Search bar & Add Button */}
         <View className="flex-row gap-2 mb-3 items-center">
-          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
+          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line-strong flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
               placeholder="Cari nama produk menu..."
@@ -581,7 +582,7 @@ export default function AdminProductScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior="padding"
           style={{ flex: 1 }}
         >
           <View
@@ -599,10 +600,10 @@ export default function AdminProductScreen() {
               }}
             />
             <View
-              style={isTablet ? { width: "100%", maxWidth: 580 } : undefined}
+              style={isTablet ? { width: "100%", maxWidth: 580 } : { paddingBottom: sheetPadBottom }}
               className={`bg-surface ${
                 isTablet
-                  ? "rounded-2xl border border-line shadow-2xl"
+                  ? "rounded-2xl border border-line shadow-xl"
                   : "rounded-t-card border-t border-line"
               } p-6 max-h-[85%]`}
             >

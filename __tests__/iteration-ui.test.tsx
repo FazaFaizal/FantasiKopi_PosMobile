@@ -73,7 +73,7 @@ describe("Shared UI & Responsive Architecture (UI Components, Sidebar & Tablet L
           size: "sm",
         });
         expect(outlineBtn.props.className).toContain("border-primary");
-        expect(outlineBtn.props.className).toContain("min-h-10");
+        expect(outlineBtn.props.className).toContain("min-h-11");
 
         const dangerBtn = Button({
           title: "Hapus",
@@ -131,7 +131,7 @@ describe("Shared UI & Responsive Architecture (UI Components, Sidebar & Tablet L
           <Input label="Password" error="Minimal 6 karakter" />,
         );
         expect(errorHtml).toContain("Minimal 6 karakter");
-        expect(errorHtml).toContain("border-primary");
+        expect(errorHtml).toContain("border-danger");
 
         const hintHtml = renderToStaticMarkup(
           <Input label="Nama" hint="Sesuai KTP" />,

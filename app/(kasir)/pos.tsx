@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   Alert,
   FlatList,
+  Image,
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Button } from '../../components/Button';
 import { ScreenHeader } from '../../components/ScreenHeader';
@@ -40,7 +40,14 @@ import {
 import { isPosLocked } from '../../lib/shift-logic';
 import type { PaymentMethod } from '../../lib/order-logic';
 import { ShiftRequiredNotice } from '../../components/ShiftRequiredNotice';
+import { IncomingOrdersButton } from '../../components/IncomingOrdersButton';
 import { toggleProductAvailability } from '../../lib/product-logic';
+
+const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: 'Tunai', label: 'Tunai', icon: 'cash-outline' },
+  { value: 'QRIS', label: 'QRIS', icon: 'qr-code-outline' },
+  { value: 'Debit', label: 'Debit', icon: 'card-outline' },
+];
 
 interface CategoryItem {
   id: string;
@@ -49,8 +56,10 @@ interface CategoryItem {
 
 export default function KasirPOS() {
   const { signOut, user } = useAuth();
-  const { openSidebar } = useKasirSidebar();
-  const { isTablet } = useResponsive();
+  const { openSidebar, incoming, openOrder } = useKasirSidebar();
+  const { isTablet, width } = useResponsive();
+  // Panel keranjang tablet: 38% layar, minimal 360px, maksimal 440px.
+  const cartPanelWidth = Math.min(440, Math.max(360, Math.round(width * 0.38)));
   const insets = useSafeAreaInsets();
 
   // State Produk & Kategori
@@ -61,6 +70,8 @@ export default function KasirPOS() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [togglingProductId, setTogglingProductId] = useState<string | null>(null);
+  // Foto yang gagal dimuat (URL rusak / offline) diganti ikon pengganti.
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   // State Keranjang Belanja & Checkout
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -69,6 +80,8 @@ export default function KasirPOS() {
   const [customerName, setCustomerName] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Tunai');
   const [cashGivenText, setCashGivenText] = useState('');
+  // Langkah bayar tunai: uang diterima diisi di modal setelah menekan Bayar.
+  const [cashModalVisible, setCashModalVisible] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
   // State Modal Catatan Item
@@ -102,7 +115,7 @@ export default function KasirPOS() {
         supabase.from('categories').select('id, name, status').order('name', { ascending: true }),
         supabase
           .from('products')
-          .select('id, name, price, category_id, status, is_active')
+          .select('id, name, price, category_id, status, is_active, image')
           .eq('is_active', true)
           .order('name', { ascending: true }),
       ]);
@@ -171,41 +184,41 @@ export default function KasirPOS() {
     return getQuickCashSuggestions(total);
   }, [total]);
 
-  // Handler Toggle Ketersediaan Menu oleh Kasir (Hanya status yang dapat diubah)
-  const handleToggleProductStatus = async (product: PosProduct) => {
-    const current = (product.status === 'Tidak Tersedia' ? 'Tidak Tersedia' : 'Tersedia') as
-      | 'Tersedia'
-      | 'Tidak Tersedia';
-    const nextStatus = toggleProductAvailability(current);
+  // Ketersediaan menu oleh Kasir (hanya kolom status yang boleh diubah).
+  type Availability = 'Tersedia' | 'Tidak Tersedia';
+  // Produk yang statusnya akan diubah; modal konfirmasi tampil selama tidak null.
+  const [statusConfirm, setStatusConfirm] = useState<PosProduct | null>(null);
 
+  const saveProductStatus = async (product: PosProduct, from: Availability, to: Availability): Promise<boolean> => {
     try {
       setTogglingProductId(product.id);
-
       // Optimistic update pada antarmuka kasir
-      setProducts((prev) =>
-        prev.map((p) => (p.id === product.id ? { ...p, status: nextStatus } : p))
-      );
-
-      // Simpan perubahan HANYA kolom status ke Supabase
-      const { error } = await supabase
-        .from('products')
-        .update({ status: nextStatus })
-        .eq('id', product.id);
-
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, status: to } : p)));
+      const { error } = await supabase.from('products').update({ status: to }).eq('id', product.id);
       if (error) throw error;
+      return true;
     } catch (err: any) {
       console.error('Error toggling product status:', err);
-      // Revert optimistic update jika gagal
-      setProducts((prev) =>
-        prev.map((p) => (p.id === product.id ? { ...p, status: current } : p))
-      );
-      Alert.alert(
-        'Gagal Mengubah Status',
-        err?.message || 'Terjadi kesalahan saat memperbarui status produk.'
-      );
+      setProducts((prev) => prev.map((p) => (p.id === product.id ? { ...p, status: from } : p)));
+      Alert.alert('Gagal Mengubah Status', err?.message || 'Terjadi kesalahan saat memperbarui status produk.');
+      return false;
     } finally {
       setTogglingProductId(null);
     }
+  };
+
+  const getAvailability = (product: PosProduct): Availability =>
+    product.status === 'Tidak Tersedia' ? 'Tidak Tersedia' : 'Tersedia';
+
+  // Mengetuk pil hanya membuka konfirmasi; status baru berubah setelah dikonfirmasi.
+  const handleToggleProductStatus = (product: PosProduct) => setStatusConfirm(product);
+
+  const handleConfirmProductStatus = async () => {
+    if (!statusConfirm) return;
+    const product = statusConfirm;
+    const current = getAvailability(product);
+    setStatusConfirm(null);
+    await saveProductStatus(product, current, toggleProductAvailability(current) as Availability);
   };
 
   // Handler Keranjang
@@ -308,6 +321,7 @@ export default function KasirPOS() {
       setCashGivenText('');
       setCustomerName('');
       setCartModalVisible(false);
+      setCashModalVisible(false);
       setReceiptModalVisible(true);
     } catch (err: any) {
       console.error('Error completing order:', err);
@@ -327,84 +341,71 @@ export default function KasirPOS() {
   // Render Konten Keranjang (Dipakai di Tablet Panel atau Smartphone Modal)
   const renderCartContent = (inModal = false) => (
     <View className="flex-1 bg-surface">
-      {/* Header Keranjang / Pembayaran */}
+      {/* Header Keranjang / Pembayaran: HP memakai header layar penuh, tablet satu baris ringkas */}
       {inModal ? (
         <ScreenHeader
-          title="Keranjang & Pembayaran"
-          subtitle={`Total: ${formatRupiah(total)} • ${totalItems} item pesanan`}
+          title="Keranjang"
+          subtitle={`${totalItems} item · ${formatRupiah(total)}`}
           onClose={() => setCartModalVisible(false)}
+          showNetworkStatus={false}
           rightAction={
             cart.length > 0 ? (
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel="Kosongkan keranjang"
                 onPress={handleClearCart}
-                className="flex-row items-center bg-white/15 px-3 py-1.5 rounded-chip"
+                className="w-11 h-11 items-center justify-center bg-white/15 rounded-chip"
               >
-                <Ionicons name="trash-outline" size={15} color="#FFFFFF" />
-                <Text className="font-body-medium text-white text-xs ml-1.5">Reset</Text>
+                <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
               </TouchableOpacity>
             ) : null
           }
         />
       ) : (
-        <View className="p-4 border-b border-line flex-row justify-between items-center bg-surface">
-          <View className="flex-row items-center">
-            <View className="w-8 h-8 rounded-full bg-primary/10 items-center justify-center mr-2">
-              <Ionicons name="cart" size={18} color="#D1001F" />
-            </View>
-            <View>
-              <Text className="font-heading-semibold text-text text-base">Keranjang Pesanan</Text>
-              <Text className="font-body text-muted text-xs">{totalItems} item pesanan</Text>
-            </View>
-          </View>
-
+        <View className="px-4 py-2 border-b border-line flex-row justify-between items-center bg-surface min-h-14">
+          <Text className="font-heading-semibold text-text text-base">
+            Keranjang <Text className="font-body text-muted text-sm">· {totalItems} item</Text>
+          </Text>
           {cart.length > 0 && (
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Kosongkan keranjang"
               onPress={handleClearCart}
-              className="p-1.5 rounded-chip bg-rose-50 border border-rose-200"
+              className="w-11 h-11 items-center justify-center rounded-chip"
             >
-              <Ionicons name="trash-outline" size={16} color="#DC2626" />
+              <Ionicons name="trash-outline" size={18} color="#991B1B" />
             </TouchableOpacity>
           )}
         </View>
       )}
 
-      {/* Input Tipe Pesanan & Nama Pelanggan / Nomor Meja */}
-      <View className="p-3 bg-background border-b border-line">
-        <View className="flex-row items-center justify-between mb-2">
-          <Text className="font-heading-semibold text-text text-xs">Tipe Pesanan</Text>
-          <View className="flex-row bg-surface border border-line rounded-chip p-0.5">
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Pilih Dine In"
-              onPress={() => setOrderType('Dine In')}
-              className={`px-3 py-1 rounded-chip ${orderType === 'Dine In' ? 'bg-primary' : 'bg-transparent'}`}
-            >
-              <Text className={`text-[11px] font-heading-semibold ${orderType === 'Dine In' ? 'text-white' : 'text-muted'}`}>
-                Dine In
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Pilih Take Away"
-              onPress={() => setOrderType('Take Away')}
-              className={`px-3 py-1 rounded-chip ${orderType === 'Take Away' ? 'bg-primary' : 'bg-transparent'}`}
-            >
-              <Text className={`text-[11px] font-heading-semibold ${orderType === 'Take Away' ? 'text-white' : 'text-muted'}`}>
-                Take Away
-              </Text>
-            </TouchableOpacity>
-          </View>
+      {/* Tipe pesanan & meja/nama pelanggan dalam satu baris */}
+      <View className="px-3 py-2 bg-background border-b border-line flex-row items-center gap-2">
+        <View className="flex-row bg-surface border border-line rounded-chip p-0.5" accessibilityRole="radiogroup">
+          {(['Dine In', 'Take Away'] as const).map((type) => {
+            const selected = orderType === type;
+            return (
+              <TouchableOpacity
+                key={type}
+                accessibilityRole="radio"
+                accessibilityLabel={type}
+                accessibilityState={{ selected }}
+                onPress={() => setOrderType(type)}
+                className={`px-3 min-h-11 justify-center rounded-chip ${selected ? 'bg-primary' : 'bg-transparent'}`}
+              >
+                <Text className={`text-xs font-heading-semibold ${selected ? 'text-white' : 'text-text'}`}>{type}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-
-        <Text className="font-heading-semibold text-text text-xs mb-1">Pelanggan / Nomor Meja</Text>
         <TextInput
-          placeholder="Contoh: Meja 03 / Kak Sarah"
-          placeholderTextColor="#9CA3AF"
+          accessibilityLabel="Nomor meja atau nama pelanggan, opsional"
+          placeholder={orderType === 'Dine In' ? 'Meja / nama' : 'Nama pelanggan'}
+          placeholderTextColor="#6B7280"
           value={customerName}
           onChangeText={setCustomerName}
-          className="bg-surface border border-line rounded-chip px-3 py-2 text-xs font-body text-text"
+          className="flex-1 bg-surface border border-line-strong rounded-chip px-3 min-h-11 font-body text-text"
+          style={{ fontSize: 14, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }}
         />
       </View>
 
@@ -418,61 +419,86 @@ export default function KasirPOS() {
           </Text>
         </View>
       ) : (
-        <ScrollView className="flex-1 p-3" showsVerticalScrollIndicator={false}>
+        <ScrollView
+          className="flex-1"
+          // Padding di wadah isi agar kartu terakhir tidak menempel ke garis footer saat digulir ke bawah.
+          contentContainerStyle={{ padding: 12, paddingBottom: 16 }}
+          showsVerticalScrollIndicator={false}
+        >
           {cart.map((item) => (
             <View
               key={item.productId}
-              className="bg-surface border border-line rounded-card p-3 mb-2.5 shadow-sm"
+              className="bg-surface border border-line rounded-card p-3 mb-2.5"
             >
-              <View className="flex-row justify-between items-start">
-                <View className="flex-1 mr-2">
-                  <Text className="font-heading-semibold text-text text-sm" numberOfLines={1}>
-                    {item.productName}
-                  </Text>
-                  <Text className="font-body text-muted text-xs mt-0.5">
-                    {formatRupiah(item.unitPrice)}
+              {/* Ketuk nama/harga untuk menambah atau mengubah catatan; catatan hanya tampil bila ada */}
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={
+                  item.notes
+                    ? `${item.productName}, catatan: ${item.notes}. Ketuk untuk mengubah catatan`
+                    : `${item.productName}. Ketuk untuk menambah catatan`
+                }
+                onPress={() => handleOpenNotesModal(item)}
+                activeOpacity={0.7}
+                className="min-h-11"
+              >
+                <View className="flex-row justify-between items-start">
+                  <View className="flex-1 mr-2">
+                    <Text className="font-heading-semibold text-text text-sm" numberOfLines={1}>
+                      {item.productName}
+                    </Text>
+                    <Text className="font-body text-muted text-xs mt-0.5">
+                      {formatRupiah(item.unitPrice)}
+                    </Text>
+                  </View>
+
+                  {/* Subtotal Item */}
+                  <Text className="font-heading-semibold text-primary text-sm">
+                    {formatRupiah(item.unitPrice * item.quantity)}
                   </Text>
                 </View>
 
-                {/* Subtotal Item */}
-                <Text className="font-heading-semibold text-primary text-sm">
-                  {formatRupiah(item.unitPrice * item.quantity)}
-                </Text>
-              </View>
-
-              {/* Catatan Khusus Item */}
-              <TouchableOpacity
-                onPress={() => handleOpenNotesModal(item)}
-                className="mt-2 py-1 px-2 rounded-chip bg-background border border-line flex-row items-center self-start"
-              >
-                <Ionicons name="create-outline" size={12} color="#6B7280" />
-                <Text className="font-body text-muted text-[11px] ml-1">
-                  {item.notes ? item.notes : 'Tambah catatan (less sweet, dll)'}
-                </Text>
+                {item.notes ? (
+                  <View className="flex-row items-start mt-1.5">
+                    <Ionicons name="create-outline" size={14} color="#6B7280" style={{ marginTop: 1 }} />
+                    <Text className="font-body text-text text-xs ml-1 flex-1" numberOfLines={2}>
+                      {item.notes}
+                    </Text>
+                  </View>
+                ) : null}
               </TouchableOpacity>
 
               {/* Quantity Controller & Hapus */}
               <View className="flex-row justify-between items-center mt-2.5 pt-2 border-t border-line">
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Hapus ${item.productName} dari keranjang`}
                   onPress={() => handleRemoveFromCart(item.productId)}
-                  className="p-1 rounded-chip"
+                  className="w-11 h-11 items-center justify-center rounded-chip"
                 >
-                  <Ionicons name="trash-outline" size={16} color="#9CA3AF" />
+                  <Ionicons name="trash-outline" size={18} color="#6B7280" />
                 </TouchableOpacity>
 
                 <View className="flex-row items-center bg-background rounded-chip border border-line">
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Kurangi ${item.productName}`}
                     onPress={() => handleUpdateQuantity(item.productId, -1)}
-                    className="w-7 h-7 items-center justify-center bg-line/50 rounded-l-chip"
+                    className="w-11 h-11 items-center justify-center bg-line/50 rounded-l-chip"
                   >
-                    <Ionicons name="remove" size={14} color="#111827" />
+                    <Ionicons name="remove" size={16} color="#111827" />
                   </TouchableOpacity>
-                  <Text className="font-heading-semibold text-text text-xs px-3">
+                  <Text
+                    accessibilityLabel={`Jumlah ${item.quantity}`}
+                    className="font-heading-semibold text-text text-sm px-3"
+                  >
                     {item.quantity}
                   </Text>
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Tambah ${item.productName}`}
                     onPress={() => handleUpdateQuantity(item.productId, 1)}
-                    className="w-7 h-7 items-center justify-center bg-primary rounded-r-chip"
+                    className="w-11 h-11 items-center justify-center bg-primary rounded-r-chip"
                   >
                     <Ionicons name="add" size={14} color="#FFFFFF" />
                   </TouchableOpacity>
@@ -486,153 +512,153 @@ export default function KasirPOS() {
       {/* Bagian Checkout & Pembayaran */}
       {cart.length > 0 && (
         <View
-          className="p-4 bg-surface border-t border-line shadow-lg"
-          style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+          className="bg-surface border-t border-line px-4 pt-3"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
         >
-          {/* Subtotal & Total */}
-          <View className="flex-row justify-between items-center mb-2">
-            <Text className="font-body text-muted text-xs">Total Pembayaran</Text>
-            <Text className="font-heading text-primary text-xl">{formatRupiah(total)}</Text>
+          {/* Ringkasan: total jadi titik fokus, kembalian langsung di sebelahnya */}
+          <View className="flex-row items-end justify-between mb-3">
+            <View className="flex-1 mr-3">
+              <Text className="font-body text-muted text-xs">Total · {totalItems} item</Text>
+              <Text className="font-heading text-text text-2xl" numberOfLines={1}>
+                {formatRupiah(total)}
+              </Text>
+            </View>
           </View>
 
-          {/* Pilihan Metode Bayar */}
-          <View className="flex-row gap-2 mb-3">
-            <TouchableOpacity
-              onPress={() => setPaymentMethod('Tunai')}
-              className={`flex-1 py-2 px-3 rounded-chip border items-center flex-row justify-center ${
-                paymentMethod === 'Tunai'
-                  ? 'bg-primary/10 border-primary'
-                  : 'bg-background border-line'
-              }`}
-            >
-              <Ionicons
-                name="cash-outline"
-                size={16}
-                color={paymentMethod === 'Tunai' ? '#D1001F' : '#6B7280'}
-              />
-              <Text
-                className={`font-heading-semibold text-xs ml-1.5 ${
-                  paymentMethod === 'Tunai' ? 'text-primary' : 'text-muted'
-                }`}
-              >
-                Tunai
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setPaymentMethod('QRIS')}
-              className={`flex-1 py-2 px-3 rounded-chip border items-center flex-row justify-center ${
-                paymentMethod === 'QRIS'
-                  ? 'bg-primary/10 border-primary'
-                  : 'bg-background border-line'
-              }`}
-            >
-              <Ionicons
-                name="qr-code-outline"
-                size={16}
-                color={paymentMethod === 'QRIS' ? '#D1001F' : '#6B7280'}
-              />
-              <Text
-                className={`font-heading-semibold text-xs ml-1.5 ${
-                  paymentMethod === 'QRIS' ? 'text-primary' : 'text-muted'
-                }`}
-              >
-                QRIS
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setPaymentMethod('Debit')}
-              className={`flex-1 py-2 px-3 rounded-chip border items-center flex-row justify-center ${
-                paymentMethod === 'Debit'
-                  ? 'bg-primary/10 border-primary'
-                  : 'bg-background border-line'
-              }`}
-            >
-              <Ionicons
-                name="card-outline"
-                size={16}
-                color={paymentMethod === 'Debit' ? '#D1001F' : '#6B7280'}
-              />
-              <Text
-                className={`font-heading-semibold text-xs ml-1.5 ${
-                  paymentMethod === 'Debit' ? 'text-primary' : 'text-muted'
-                }`}
-              >
-                Debit
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Form Pembayaran Tunai & Kembalian */}
-          {paymentMethod === 'Tunai' ? (
-            <View className="mb-3 bg-background p-2.5 rounded-chip border border-line">
-              <Text className="font-body text-muted text-[11px] mb-1">Nominal Uang Diterima:</Text>
-              <TextInput
-                placeholder="Masukkan nominal (Rp)"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="numeric"
-                value={cashGivenText}
-                onChangeText={setCashGivenText}
-                className="bg-surface border border-line rounded-chip px-3 py-1.5 text-xs font-heading-semibold text-text mb-2"
-              />
-
-              {/* Tombol Cepat Pecahan Uang */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row gap-1.5 mb-2">
-                {quickCashSuggestions.map((amount) => (
-                  <TouchableOpacity
-                    key={amount}
-                    onPress={() => setCashGivenText(String(amount))}
-                    className="bg-surface border border-line px-2 py-1 rounded-chip"
-                  >
-                    <Text className="font-body text-text text-[11px]">
-                      {amount === total ? 'Uang Pas' : formatRupiah(amount)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Status Kembalian */}
-              {cashGivenNumber > 0 && (
-                <View className="flex-row justify-between items-center pt-1.5 border-t border-line">
-                  <Text className="font-body text-muted text-xs">Uang Kembalian:</Text>
-                  <Text
-                    className={`font-heading-semibold text-xs ${
-                      cashCalculation.isValid ? 'text-emerald-700' : 'text-rose-600'
-                    }`}
-                  >
-                    {cashCalculation.isValid
-                      ? formatRupiah(cashCalculation.change)
-                      : cashCalculation.error}
+          {/* Metode bayar: satu kontrol bersegmen */}
+          <View className="flex-row bg-background border border-line rounded-chip p-1 mb-3" accessibilityRole="radiogroup">
+            {PAYMENT_OPTIONS.map((opt) => {
+              const selected = paymentMethod === opt.value;
+              return (
+                <TouchableOpacity
+                  key={opt.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`Bayar ${opt.label}`}
+                  accessibilityState={{ selected }}
+                  onPress={() => setPaymentMethod(opt.value)}
+                  className={`flex-1 min-h-11 rounded-chip flex-row items-center justify-center ${
+                    selected ? 'bg-primary' : 'bg-transparent'
+                  }`}
+                >
+                  <Ionicons name={opt.icon} size={16} color={selected ? '#FFFFFF' : '#4B5563'} />
+                  <Text className={`text-sm ml-1.5 ${selected ? 'font-heading-semibold text-white' : 'font-body-medium text-text'}`}>
+                    {opt.label}
                   </Text>
-                </View>
-              )}
-            </View>
-          ) : (
-            <View className="mb-3 bg-amber-500/10 p-2.5 rounded-chip border border-amber-500/20 flex-row items-center">
-              <Ionicons name="information-circle-outline" size={18} color="#B45309" />
-              <Text className="font-body text-amber-800 text-[11px] ml-2 flex-1">
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {paymentMethod !== 'Tunai' ? (
+            <View className="mb-3 flex-row items-start">
+              <Ionicons name="information-circle-outline" size={18} color="#4B5563" />
+              <Text className="font-body text-text text-xs ml-2 flex-1 leading-4">
                 {paymentMethod === 'Debit'
-                  ? 'Gesek/tap kartu pelanggan di mesin EDC. Tekan tombol di bawah setelah transaksi disetujui.'
-                  : 'Arahkan pelanggan scan kode QRIS kedai di meja kasir. Tekan tombol di bawah setelah dana masuk.'}
+                  ? 'Gesek/tap kartu pelanggan di mesin EDC, lalu tekan Bayar setelah transaksi disetujui.'
+                  : 'Arahkan pelanggan scan QRIS kedai, lalu tekan Bayar setelah dana masuk.'}
               </Text>
             </View>
-          )}
+          ) : null}
 
-          {/* Tombol Proses Bayar */}
           <Button
-            title={
-              submittingOrder
-                ? 'Memproses...'
-                : `Bayar Sekarang • ${formatRupiah(total)}`
-            }
-            onPress={handleProcessOrder}
-            disabled={submittingOrder || (paymentMethod === 'Tunai' && !cashCalculation.isValid)}
-            icon={<Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />}
+            size="lg"
+            title={submittingOrder ? 'Memproses...' : `Bayar ${formatRupiah(total)}`}
+            onPress={paymentMethod === 'Tunai' ? () => setCashModalVisible(true) : handleProcessOrder}
+            isLoading={submittingOrder && !cashModalVisible}
+            disabled={submittingOrder}
+            icon={<Ionicons name={paymentMethod === 'Tunai' ? 'cash-outline' : 'checkmark-circle'} size={18} color="#FFFFFF" />}
           />
         </View>
       )}
     </View>
+  );
+
+  // Langkah bayar tunai: total, uang diterima, pecahan cepat, kembalian, konfirmasi.
+  const cashModal = (
+        <Modal
+          visible={cashModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setCashModalVisible(false)}
+        >
+          <KeyboardAvoidingView behavior="padding" className="flex-1 bg-black/50 justify-center items-center p-5">
+            <View className="bg-surface rounded-card p-5 w-full max-w-md border border-line shadow-xl">
+              <Text className="font-heading text-text text-lg">Terima pembayaran tunai</Text>
+              <View className="flex-row justify-between items-end mt-3 mb-4">
+                <Text className="font-body text-muted text-sm">Total</Text>
+                <Text className="font-heading text-text text-2xl">{formatRupiah(total)}</Text>
+              </View>
+    
+              <Text className="font-body-medium text-text text-xs mb-1">Uang diterima</Text>
+              <TextInput
+                accessibilityLabel="Uang diterima"
+                autoFocus
+                placeholder="Masukkan nominal"
+                placeholderTextColor="#6B7280"
+                keyboardType="number-pad"
+                value={cashGivenText}
+                onChangeText={setCashGivenText}
+                className="bg-surface border border-line-strong rounded-chip px-3 min-h-14 font-heading text-text"
+                // Ukuran lewat style: kelas text-xl memasang lineHeight yang memotong angka di Android.
+                style={{ fontSize: 20, paddingVertical: 0, textAlignVertical: 'center', includeFontPadding: false }}
+              />
+    
+              {/* Pecahan cepat: membungkus ke baris berikut, tidak perlu digeser */}
+              <View className="flex-row flex-wrap gap-2 mt-2">
+                {quickCashSuggestions.map((amount) => {
+                  const active = cashGivenNumber === amount;
+                  return (
+                    <TouchableOpacity
+                      key={amount}
+                      accessibilityRole="button"
+                      accessibilityLabel={amount === total ? 'Uang pas' : `Uang diterima ${formatRupiah(amount)}`}
+                      accessibilityState={{ selected: active }}
+                      onPress={() => setCashGivenText(String(amount))}
+                      className={`px-3 min-h-11 justify-center rounded-chip border ${
+                        active ? 'bg-primary/10 border-primary' : 'bg-surface border-line'
+                      }`}
+                    >
+                      <Text className={`text-sm ${active ? 'font-heading-semibold text-primary' : 'font-body text-text'}`}>
+                        {amount === total ? 'Uang pas' : formatRupiah(amount)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+    
+              {cashGivenNumber > 0 && !cashCalculation.isValid ? (
+                <View className="flex-row items-center mt-2" accessibilityLiveRegion="polite">
+                  <Ionicons name="alert-circle" size={14} color="#991B1B" />
+                  <Text className="font-body text-danger text-xs ml-1 flex-1">{cashCalculation.error}</Text>
+                </View>
+              ) : null}
+    
+              <View
+                className={`flex-row justify-between items-center mt-4 p-3 rounded-chip ${
+                  cashCalculation.isValid ? 'bg-success-soft' : 'bg-background'
+                }`}
+              >
+                <Text className={`font-heading-semibold text-base ${cashCalculation.isValid ? 'text-success' : 'text-muted'}`}>
+                  Kembalian
+                </Text>
+                <Text className={`font-heading text-xl ${cashCalculation.isValid ? 'text-success' : 'text-muted'}`}>
+                  {cashCalculation.isValid ? formatRupiah(cashCalculation.change) : '-'}
+                </Text>
+              </View>
+    
+              <View className="flex-row gap-2 mt-5">
+                <Button title="Batal" variant="outline" className="flex-1" onPress={() => setCashModalVisible(false)} />
+                <Button
+                  title={submittingOrder ? 'Memproses...' : 'Konfirmasi Bayar'}
+                  className="flex-1"
+                  isLoading={submittingOrder}
+                  disabled={submittingOrder || !cashCalculation.isValid}
+                  onPress={handleProcessOrder}
+                />
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
   );
 
   return (
@@ -640,18 +666,26 @@ export default function KasirPOS() {
       {/* Header Utama Kasir */}
       <ScreenHeader
         title="Terminal Kasir POS"
-        subtitle="Fantasi Coffee Point of Sale"
+        subtitle={user?.email ?? undefined}
         onOpenSidebar={openSidebar}
         rightAction={
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Keluar dari sesi kasir"
-            onPress={handleLogout}
-            className="flex-row items-center bg-white/15 px-3 py-1.5 rounded-chip"
-          >
-            <Ionicons name="log-out-outline" size={15} color="#FFFFFF" />
-            <Text className="font-body-medium text-white text-xs ml-1.5">Keluar</Text>
-          </TouchableOpacity>
+          <View className="flex-row items-center gap-2">
+            <IncomingOrdersButton
+              orders={incoming}
+              onOpenOrder={openOrder}
+              onOpenAll={() => router.replace('/(kasir)/orders' as never)}
+            />
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Keluar dari sesi kasir"
+              onPress={handleLogout}
+              className={`flex-row items-center justify-center bg-white/15 min-h-11 rounded-chip ${isTablet ? 'px-3' : 'w-11'}`}
+            >
+              <Ionicons name="log-out-outline" size={isTablet ? 15 : 18} color="#FFFFFF" />
+              {/* Di HP cukup ikon agar judul header tidak terpotong; label tetap dibacakan pembaca layar. */}
+              {isTablet ? <Text className="font-body-medium text-white text-xs ml-1.5">Keluar</Text> : null}
+            </TouchableOpacity>
+          </View>
         }
       />
 
@@ -664,33 +698,35 @@ export default function KasirPOS() {
       )}
 
       {/* Main Content Layout (Split Screen di Tablet, Single Column di Phone) */}
-      <View className="flex-1 flex-row" style={shiftLoading || posLocked ? { display: 'none' } : undefined}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        className="flex-1 flex-row"
+        style={shiftLoading || posLocked ? { display: 'none' } : undefined}
+      >
         {/* Katalog Menu (Left Side) */}
         <View className="flex-1">
           {/* Baris Pencarian & Profil Petugas */}
           <View className="p-3 bg-surface border-b border-line flex-row items-center gap-2">
-            <View className="flex-1 flex-row items-center bg-background border border-line rounded-chip px-3 py-1.5">
-              <Ionicons name="search" size={16} color="#9CA3AF" />
+            <View className="flex-1 flex-row items-center bg-background border border-line-strong rounded-chip min-h-11 px-3 py-1.5">
+              <Ionicons name="search" size={16} color="#6B7280" />
               <TextInput
+                accessibilityLabel="Cari menu"
                 placeholder="Cari kopi, manual brew, pastry..."
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor="#6B7280"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 className="flex-1 ml-2 text-xs font-body text-text py-0"
               />
               {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Ionicons name="close-circle" size={16} color="#9CA3AF" />
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Hapus pencarian"
+                  hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+                  onPress={() => setSearchQuery('')}
+                >
+                  <Ionicons name="close-circle" size={16} color="#6B7280" />
                 </TouchableOpacity>
               )}
-            </View>
-
-            {/* Quick Badge Sesi Kasir */}
-            <View className="hidden md:flex flex-row items-center bg-background px-3 py-1.5 rounded-chip border border-line">
-              <Ionicons name="person-circle" size={16} color="#D1001F" />
-              <Text className="font-body text-text text-xs ml-1.5" numberOfLines={1}>
-                {user?.email}
-              </Text>
             </View>
           </View>
 
@@ -698,8 +734,10 @@ export default function KasirPOS() {
           <View className="bg-surface border-b border-line py-2 px-3">
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedCategory === null }}
                 onPress={() => setSelectedCategory(null)}
-                className={`px-3 py-1.5 rounded-chip mr-2 border ${
+                className={`px-3 min-h-11 justify-center rounded-chip mr-2 border ${
                   selectedCategory === null
                     ? 'bg-primary border-primary'
                     : 'bg-background border-line'
@@ -719,8 +757,10 @@ export default function KasirPOS() {
                 return (
                   <TouchableOpacity
                     key={cat.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
                     onPress={() => setSelectedCategory(cat.id)}
-                    className={`px-3 py-1.5 rounded-chip mr-2 border ${
+                    className={`px-3 min-h-11 justify-center rounded-chip mr-2 border ${
                       isSelected ? 'bg-primary border-primary' : 'bg-background border-line'
                     }`}
                   >
@@ -752,8 +792,8 @@ export default function KasirPOS() {
             <FlatList
               data={filteredProducts}
               keyExtractor={(item) => item.id}
-              numColumns={isTablet ? 3 : 2}
-              key={isTablet ? 'grid-3' : 'grid-2'}
+              numColumns={isTablet ? 3 : 1}
+              key={isTablet ? 'grid-3' : 'list-1'}
               contentContainerStyle={{
                 padding: 12,
                 paddingBottom: isTablet ? 40 : 120, // Beri jarak bottom bar jika di smartphone
@@ -763,97 +803,142 @@ export default function KasirPOS() {
                 const cartMatch = cart.find((c) => c.productId === item.id);
                 const isToggling = togglingProductId === item.id;
 
-                return (
-                  <View
-                    className={`flex-1 m-1.5 bg-surface border rounded-card p-3 shadow-sm justify-between ${
-                      isUnavailable ? 'border-line bg-slate-50/70' : 'border-line'
+                const availabilityToggle = (
+                  <TouchableOpacity
+                    accessibilityRole="switch"
+                    accessibilityLabel={`Ketersediaan ${item.name}`}
+                    accessibilityHint={isUnavailable ? 'Ketuk untuk menandai tersedia' : 'Ketuk untuk menandai habis'}
+                    accessibilityState={{ checked: !isUnavailable, disabled: isToggling }}
+                    onPress={() => handleToggleProductStatus(item)}
+                    disabled={isToggling}
+                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                    className={`flex-row items-center px-2.5 min-h-8 rounded-chip border ${
+                      isUnavailable ? 'bg-danger-soft border-danger/30' : 'bg-success-soft border-success/30'
                     }`}
-                    style={{ minHeight: 128 }}
                   >
-                    {/* Header Kartu: Ikon Menu & Tombol Toggle Status */}
-                    <View className="flex-row justify-between items-start mb-2">
-                      <View className="w-8 h-8 rounded-card bg-primary/10 items-center justify-center">
-                        <Ionicons name="cafe" size={16} color="#D1001F" />
-                      </View>
+                    <View className={`w-2 h-2 rounded-full mr-1.5 ${isUnavailable ? 'bg-danger' : 'bg-success'}`} />
+                    <Text className={`text-xs font-heading-semibold ${isUnavailable ? 'text-danger' : 'text-success'}`}>
+                      {isToggling ? '...' : isUnavailable ? 'Habis' : 'Tersedia'}
+                    </Text>
+                    <Ionicons
+                      name="swap-horizontal"
+                      size={12}
+                      color={isUnavailable ? '#991B1B' : '#166534'}
+                      style={{ marginLeft: 4 }}
+                    />
+                  </TouchableOpacity>
+                );
 
-                      {/* Tombol Toggle Ketersediaan Khusus Kasir */}
-                      <TouchableOpacity
-                        accessibilityRole="switch"
-                        accessibilityLabel={`Ubah status ${item.name}`}
-                        onPress={() => handleToggleProductStatus(item)}
-                        disabled={isToggling}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        className={`flex-row items-center px-2 py-0.5 rounded-full border ${
-                          isUnavailable
-                            ? 'bg-rose-50 border-rose-200'
-                            : 'bg-emerald-50 border-emerald-200'
-                        }`}
-                      >
-                        <View
-                          className={`w-2 h-2 rounded-full mr-1.5 ${
-                            isUnavailable ? 'bg-rose-600' : 'bg-emerald-600'
-                          }`}
+                // Seluruh kartu = tambah ke keranjang. Pil ketersediaan di dalamnya tetap punya aksi sendiri
+                // (sentuhan ditangkap tombol terdalam).
+                const addToCartProps = {
+                  onPress: () => handleAddToCart(item),
+                  disabled: isUnavailable,
+                  accessibilityRole: 'button' as const,
+                  accessibilityLabel: isUnavailable
+                    ? `${item.name} habis`
+                    : `Tambah ${item.name} ke keranjang${cartMatch ? `, sudah ${cartMatch.quantity} di keranjang` : ''}`,
+                  accessibilityState: { disabled: isUnavailable },
+                  // Kartu dibaca sebagai satu elemen oleh pembaca layar, jadi ubah ketersediaan
+                  // disediakan sebagai aksi aksesibilitas kartu.
+                  accessibilityActions: [
+                    { name: 'toggleAvailability', label: isUnavailable ? 'Tandai tersedia' : 'Tandai habis' },
+                  ],
+                  onAccessibilityAction: (e: { nativeEvent: { actionName: string } }) => {
+                    if (e.nativeEvent.actionName === 'toggleAvailability') handleToggleProductStatus(item);
+                  },
+                  activeOpacity: 0.7,
+                };
+
+                // HP: baris lebar penuh agar foto, nama, dan harga tidak berdesakan.
+                if (!isTablet) {
+                  return (
+                    <TouchableOpacity
+                      {...addToCartProps}
+                      className={`flex-row items-center border border-line rounded-card pl-3 pr-2.5 py-2.5 mb-2 ${
+                        isUnavailable ? 'bg-background' : 'bg-surface'
+                      }`}
+                    >
+                      <View className={`flex-1 flex-row items-center mr-2 ${isUnavailable ? 'opacity-60' : ''}`}>
+                        <ProductThumb
+                          size={56}
+                          uri={failedImages[item.id] ? null : item.image}
+                          onError={() => setFailedImages((prev) => ({ ...prev, [item.id]: true }))}
                         />
-                        <Text
-                          className={`text-[10px] font-heading-semibold ${
-                            isUnavailable ? 'text-rose-700' : 'text-emerald-700'
-                          }`}
-                        >
-                          {isToggling ? '...' : isUnavailable ? 'Habis' : 'Tersedia'}
-                        </Text>
-                      </TouchableOpacity>
+                        <View className="flex-1 ml-3">
+                          <Text
+                            className={`font-heading-semibold text-sm leading-5 ${
+                              isUnavailable ? 'text-muted line-through' : 'text-text'
+                            }`}
+                            numberOfLines={2}
+                          >
+                            {item.name}
+                          </Text>
+                          <View className="flex-row items-center mt-0.5">
+                            <Text className={`font-heading text-sm ${isUnavailable ? 'text-muted' : 'text-primary'}`}>
+                              {formatRupiah(item.price)}
+                            </Text>
+                            {cartMatch ? (
+                              <View className="ml-2 px-2 py-0.5 rounded-chip bg-primary">
+                                <Text className="font-heading-semibold text-white text-xs">{cartMatch.quantity} di keranjang</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                      </View>
+                      {availabilityToggle}
+                    </TouchableOpacity>
+                  );
+                }
+
+                // Tablet: kartu grid.
+                return (
+                  <TouchableOpacity
+                    {...addToCartProps}
+                    className={`flex-1 m-1.5 border border-line rounded-card p-3 ${
+                      isUnavailable ? 'bg-background' : 'bg-surface'
+                    }`}
+                  >
+                    {/* Baris atas: foto di kiri, sakelar ketersediaan di kanan */}
+                    <View className="flex-row justify-between items-start mb-2.5">
+                      <ProductThumb
+                        size={56}
+                        uri={failedImages[item.id] ? null : item.image}
+                        onError={() => setFailedImages((prev) => ({ ...prev, [item.id]: true }))}
+                      />
+                      {availabilityToggle}
                     </View>
 
-                    {/* Area Klik Menu: Menambah Item ke Keranjang */}
-                    <TouchableOpacity
-                      onPress={() => handleAddToCart(item)}
-                      disabled={isUnavailable}
-                      accessibilityRole="button"
-                      accessibilityLabel={isUnavailable ? `${item.name} habis` : `Tambah ${item.name} ke keranjang`}
-                      accessibilityState={{ disabled: isUnavailable }}
-                      activeOpacity={0.7}
-                      className={`flex-1 justify-between ${isUnavailable ? 'opacity-60' : ''}`}
-                    >
-                      <View>
-                        <Text
-                          className={`font-heading-semibold text-xs leading-4 ${
-                            isUnavailable ? 'text-muted line-through' : 'text-text'
-                          }`}
-                          numberOfLines={2}
-                        >
-                          {item.name}
-                        </Text>
-                      </View>
+                    {/* Nama selebar kartu, harga di bawah */}
+                    <View className={`flex-1 justify-between ${isUnavailable ? 'opacity-60' : ''}`}>
+                      <Text
+                        className={`font-heading-semibold text-sm leading-5 ${
+                          isUnavailable ? 'text-muted line-through' : 'text-text'
+                        }`}
+                        numberOfLines={2}
+                      >
+                        {item.name}
+                      </Text>
 
                       <View className="mt-2 pt-2 border-t border-line/60 flex-row justify-between items-center">
-                        <Text
-                          className={`font-heading text-xs ${
-                            isUnavailable ? 'text-muted' : 'text-primary'
-                          }`}
-                        >
+                        <Text className={`font-heading text-sm ${isUnavailable ? 'text-muted' : 'text-primary'}`}>
                           {formatRupiah(item.price)}
                         </Text>
-                        {isUnavailable ? (
-                          <View className="px-1.5 py-0.5 rounded-chip bg-rose-100/70">
-                            <Text className="font-body text-rose-600 text-[9px]">Kosong</Text>
-                          </View>
-                        ) : (
+                        {isUnavailable ? null : (
                           <View className="w-6 h-6 rounded-chip bg-primary/10 items-center justify-center">
                             <Ionicons name="add" size={14} color="#D1001F" />
                           </View>
                         )}
                       </View>
-                    </TouchableOpacity>
+                    </View>
 
-                    {/* Badge Item Quantity di Keranjang */}
+                    {/* Jumlah di keranjang */}
                     {cartMatch && (
-                      <View className="absolute -top-1.5 -left-1.5 bg-primary rounded-full w-5 h-5 items-center justify-center z-10 shadow-sm border border-white">
-                        <Text className="text-white text-[10px] font-heading-semibold">
-                          {cartMatch.quantity}
-                        </Text>
+                      <View className="absolute -top-1.5 -left-1.5 bg-primary rounded-full min-w-6 h-6 px-1 items-center justify-center z-10 border border-white">
+                        <Text className="text-white text-xs font-heading-semibold">{cartMatch.quantity}</Text>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 );
               }}
             />
@@ -862,15 +947,18 @@ export default function KasirPOS() {
 
         {/* Panel Keranjang di Sisi Kanan (Khusus Layar Tablet) */}
         {isTablet && (
-          <View className="w-[360px] border-l border-line bg-surface">
+          <View className="border-l border-line bg-surface" style={{ width: cartPanelWidth }}>
             {renderCartContent(false)}
           </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
 
       {/* Floating Bottom Bar Keranjang (Khusus Layar Smartphone) */}
       {!isTablet && cart.length > 0 && (
-        <View className="absolute bottom-4 left-4 right-4 bg-primary rounded-card p-3.5 shadow-xl flex-row justify-between items-center border border-white/20">
+        <View
+          className="absolute left-4 right-4 bg-primary rounded-card p-3.5 shadow-xl flex-row justify-between items-center border border-white/20"
+          style={{ bottom: Math.max(insets.bottom, 16) }}
+        >
           <View className="flex-row items-center">
             <View className="w-9 h-9 rounded-full bg-white/20 items-center justify-center mr-2.5">
               <Ionicons name="cart" size={18} color="#FFFFFF" />
@@ -886,14 +974,68 @@ export default function KasirPOS() {
           </View>
 
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Lihat keranjang dan bayar, ${totalItems} item, ${formatRupiah(total)}`}
             onPress={() => setCartModalVisible(true)}
-            className="bg-white px-4 py-2 rounded-chip flex-row items-center shadow-sm"
+            className="bg-white px-4 min-h-11 rounded-chip flex-row items-center"
           >
             <Text className="font-heading-semibold text-primary text-xs mr-1">Lihat & Bayar</Text>
             <Ionicons name="chevron-forward" size={14} color="#D1001F" />
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Modal Konfirmasi Ubah Ketersediaan Produk */}
+      <Modal
+        visible={statusConfirm !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStatusConfirm(null)}
+      >
+        <View className="flex-1 bg-black/50 justify-center items-center p-5">
+          {statusConfirm ? (
+            (() => {
+              const toUnavailable = getAvailability(statusConfirm) === 'Tersedia';
+              return (
+                <View className="bg-surface rounded-card p-5 w-full max-w-sm border border-line shadow-xl">
+                  <View
+                    className={`w-12 h-12 rounded-full items-center justify-center mb-3 ${
+                      toUnavailable ? 'bg-danger-soft' : 'bg-success-soft'
+                    }`}
+                  >
+                    <Ionicons
+                      name={toUnavailable ? 'close-circle-outline' : 'checkmark-circle-outline'}
+                      size={26}
+                      color={toUnavailable ? '#991B1B' : '#166534'}
+                    />
+                  </View>
+                  <Text className="font-heading text-text text-lg">
+                    {toUnavailable ? 'Tandai menu habis?' : 'Tandai menu tersedia?'}
+                  </Text>
+                  <Text className="font-heading-semibold text-text text-base mt-1">{statusConfirm.name}</Text>
+                  <Text className="font-body text-muted text-sm mt-2 leading-5">
+                    {toUnavailable
+                      ? 'Menu tidak bisa ditambahkan ke keranjang di POS maupun dipesan customer sampai ditandai tersedia lagi.'
+                      : 'Menu bisa kembali ditambahkan ke keranjang dan dipesan customer.'}
+                  </Text>
+                  <View className="flex-row gap-2 mt-5">
+                    <Button title="Batal" variant="outline" className="flex-1" onPress={() => setStatusConfirm(null)} />
+                    <Button
+                      title={toUnavailable ? 'Ya, Habis' : 'Ya, Tersedia'}
+                      variant={toUnavailable ? 'danger' : 'success'}
+                      className="flex-1"
+                      onPress={handleConfirmProductStatus}
+                    />
+                  </View>
+                </View>
+              );
+            })()
+          ) : null}
+        </View>
+      </Modal>
+
+      {/* Tablet: modal tunai di level layar. HP: di dalam modal keranjang (iOS tidak bisa dua modal sejajar). */}
+      {isTablet ? cashModal : null}
 
       {/* Modal Keranjang & Pembayaran (Untuk Layar Smartphone) */}
       <Modal
@@ -903,10 +1045,11 @@ export default function KasirPOS() {
         onRequestClose={() => setCartModalVisible(false)}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           className="flex-1 bg-surface"
         >
           {renderCartContent(true)}
+          {!isTablet ? cashModal : null}
         </KeyboardAvoidingView>
       </Modal>
 
@@ -917,7 +1060,7 @@ export default function KasirPOS() {
         animationType="fade"
         onRequestClose={() => setNotesModalVisible(false)}
       >
-        <View className="flex-1 bg-black/50 justify-center items-center p-5">
+        <KeyboardAvoidingView behavior="padding" className="flex-1 bg-black/50 justify-center items-center p-5">
           <View className="bg-surface rounded-card p-5 w-full max-w-sm border border-line shadow-lg">
             <Text className="font-heading-semibold text-text text-base mb-1">
               Catatan Pesanan Barista
@@ -928,10 +1071,10 @@ export default function KasirPOS() {
 
             <TextInput
               placeholder="Contoh: Less sweet, oat milk, es dipisah..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor="#6B7280"
               value={tempNotes}
               onChangeText={setTempNotes}
-              className="bg-background border border-line rounded-chip p-3 text-xs font-body text-text mb-4"
+              className="bg-background border border-line-strong rounded-chip p-3 text-xs font-body text-text mb-4"
               multiline
               numberOfLines={3}
             />
@@ -946,7 +1089,7 @@ export default function KasirPOS() {
               <Button title="Simpan Catatan" className="flex-1" onPress={handleSaveNotes} />
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal Struk Digital Transaksi Sukses */}
@@ -956,144 +1099,128 @@ export default function KasirPOS() {
         animationType="fade"
         onRequestClose={() => setReceiptModalVisible(false)}
       >
-        <View className="flex-1 bg-black/60 justify-center items-center p-5">
-          <View className="bg-surface rounded-card p-6 w-full max-w-md border border-line shadow-2xl">
+        <View className="flex-1 bg-black/60 justify-center items-center p-4">
+          <View
+            className="bg-surface rounded-card w-full border border-line shadow-xl"
+            style={{ maxWidth: isTablet ? 560 : 460, maxHeight: '92%' }}
+          >
             {/* Header Nota */}
-            <View className="items-center mb-4 pb-4 border-b border-dashed border-line">
-              <View className="w-12 h-12 rounded-full bg-emerald-500/10 items-center justify-center mb-2 border border-emerald-500/20">
-                <Ionicons name="checkmark-done" size={24} color="#047857" />
+            <View className="flex-row items-center px-5 pt-5 pb-4 border-b border-dashed border-line">
+              <View className="w-12 h-12 rounded-full bg-success-soft items-center justify-center mr-3">
+                <Ionicons name="checkmark-done" size={24} color="#166534" />
               </View>
-              <Text className="font-heading text-text text-lg">Transaksi Berhasil!</Text>
-              <Text className="font-body text-muted text-xs">Fantasi Coffee POS Terminal</Text>
+              <View className="flex-1">
+                <Text className="font-heading text-text text-lg">Transaksi Berhasil</Text>
+                {completedOrder ? (
+                  <Text className="font-body text-muted text-sm">
+                    {completedOrder.orderNumber} · {completedOrder.createdAt}
+                  </Text>
+                ) : null}
+              </View>
             </View>
 
-            {/* Rincian Nota Transaksi */}
+            {/* Rincian Nota Transaksi: tinggi mengikuti isi, digulir bila melebihi layar */}
             {completedOrder && (
-              <ScrollView className="max-h-72 mb-4" showsVerticalScrollIndicator={false}>
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-body text-muted text-xs">No. Transaksi</Text>
-                  <Text className="font-heading-semibold text-text text-xs">
-                    {completedOrder.orderNumber}
-                  </Text>
-                </View>
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-body text-muted text-xs">Pelanggan</Text>
-                  <Text className="font-body-medium text-text text-xs">
-                    {completedOrder.customerName} ({completedOrder.orderType})
-                  </Text>
-                </View>
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-body text-muted text-xs">Status Antrean</Text>
-                  <View className="bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                    <Text className="text-[10px] font-heading-semibold text-blue-700">
-                      Diproses ({completedOrder.orderStatus})
-                    </Text>
-                  </View>
-                </View>
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-body text-muted text-xs">Kasir / Waktu</Text>
-                  <Text className="font-body text-text text-xs">
-                    {completedOrder.createdAt}
-                  </Text>
-                </View>
+              <ScrollView
+                style={{ flexGrow: 0, flexShrink: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 16 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <ReceiptRow label="Pelanggan" value={`${completedOrder.customerName} · ${completedOrder.orderType}`} />
+                <ReceiptRow label="Status pesanan" value="Diproses" />
 
-                {/* Garis Pembatas */}
-                <View className="my-2 border-b border-dashed border-line" />
+                <View className="my-3 border-b border-dashed border-line" />
 
-                {/* List Item */}
                 {completedOrder.items.map((item, idx) => (
-                  <View key={idx} className="mb-2">
+                  <View key={idx} className="mb-2.5">
                     <View className="flex-row justify-between">
-                      <Text className="font-body-medium text-text text-xs flex-1 mr-2">
+                      <Text className="font-body-medium text-text text-sm flex-1 mr-3">
                         {item.quantity}x {item.productName}
                       </Text>
-                      <Text className="font-body-medium text-text text-xs">
+                      <Text className="font-body-medium text-text text-sm">
                         {formatRupiah(item.unitPrice * item.quantity)}
                       </Text>
                     </View>
                     {item.notes ? (
-                      <Text className="font-body text-muted text-[11px] italic ml-3">
-                        * {item.notes}
-                      </Text>
+                      <Text className="font-body text-muted text-sm mt-0.5">Catatan: {item.notes}</Text>
                     ) : null}
                   </View>
                 ))}
 
-                {/* Ringkasan Finansial */}
-                <View className="my-2 border-b border-dashed border-line" />
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-heading-semibold text-text text-xs">Total Pembayaran</Text>
-                  <Text className="font-heading-semibold text-primary text-sm">
-                    {formatRupiah(completedOrder.totalAmount)}
-                  </Text>
+                <View className="my-3 border-b border-dashed border-line" />
+
+                <View className="flex-row justify-between items-center mb-2">
+                  <Text className="font-heading-semibold text-text text-base">Total</Text>
+                  <Text className="font-heading text-primary text-xl">{formatRupiah(completedOrder.totalAmount)}</Text>
                 </View>
-                <View className="flex-row justify-between mb-1">
-                  <Text className="font-body text-muted text-xs">
-                    Metode ({completedOrder.paymentMethod})
-                  </Text>
-                  <Text className="font-body text-text text-xs">
-                    {formatRupiah(completedOrder.cashGiven)}
-                  </Text>
-                </View>
+                <ReceiptRow
+                  label={completedOrder.paymentMethod === 'Tunai' ? 'Tunai diterima' : `Dibayar ${completedOrder.paymentMethod}`}
+                  value={formatRupiah(completedOrder.cashGiven)}
+                />
                 {completedOrder.paymentMethod === 'Tunai' && (
-                  <View className="flex-row justify-between mb-1">
-                    <Text className="font-heading-semibold text-emerald-700 text-xs">
-                      Uang Kembalian
-                    </Text>
-                    <Text className="font-heading-semibold text-emerald-700 text-xs">
-                      {formatRupiah(completedOrder.change)}
-                    </Text>
+                  <View className="flex-row justify-between items-center mt-1 p-3 rounded-chip bg-success-soft">
+                    <Text className="font-heading-semibold text-success text-base">Kembalian</Text>
+                    <Text className="font-heading text-success text-xl">{formatRupiah(completedOrder.change)}</Text>
                   </View>
                 )}
               </ScrollView>
             )}
 
-            {/* Tombol Cetak Struk Kasir */}
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Cetak Struk"
-              onPress={() => {
-                Alert.alert(
-                  "Mencetak Struk Kasir",
-                  `Simulasi cetak struk untuk pesanan ${completedOrder?.orderNumber} berhasil dikirim ke antrean cetak.\n(Koneksi printer thermal fisik akan dihubungkan nanti).`,
-                  [{ text: "OK" }]
-                );
-              }}
-              className="mb-2.5 py-3 rounded-button bg-primary items-center justify-center flex-row shadow-sm"
-            >
-              <Ionicons name="print-outline" size={18} color="#FFFFFF" />
-              <Text className="font-heading-semibold text-white text-xs ml-2">
-                Cetak Struk (Printer Thermal)
-              </Text>
-            </TouchableOpacity>
-
-            {/* Tombol Transaksi Baru & Lihat Riwayat */}
-            <Button
-              title="Transaksi Baru"
-              variant="outline"
-              icon={<Ionicons name="refresh" size={18} color="#D1001F" />}
-              onPress={() => {
-                setReceiptModalVisible(false);
-                setCompletedOrder(null);
-              }}
-            />
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Buka Riwayat Pesanan"
-              onPress={() => {
-                setReceiptModalVisible(false);
-                setCompletedOrder(null);
-                router.replace('/(kasir)/orders' as never);
-              }}
-              className="mt-2.5 py-2.5 items-center justify-center rounded-button border border-line bg-surface"
-            >
-              <Text className="text-xs font-heading-semibold text-text">
-                Lihat di Riwayat Pesanan
-              </Text>
-            </TouchableOpacity>
+            {/* Aksi */}
+            <View className="px-5 pt-3 pb-5 border-t border-line gap-2.5">
+              {/* TODO: tombol cetak struk ditambahkan kembali setelah printer thermal tersambung. */}
+              <Button
+                title="Transaksi Baru"
+                icon={<Ionicons name="refresh" size={18} color="#FFFFFF" />}
+                onPress={() => {
+                  setReceiptModalVisible(false);
+                  setCompletedOrder(null);
+                }}
+              />
+              <Button
+                title="Lihat di Riwayat Pesanan"
+                variant="outline"
+                onPress={() => {
+                  setReceiptModalVisible(false);
+                  setCompletedOrder(null);
+                  router.replace('/(kasir)/orders' as never);
+                }}
+              />
+            </View>
           </View>
         </View>
       </Modal>
+    </View>
+  );
+}
+
+/** Foto kecil produk di kartu POS; ikon gambar sebagai penanda bila foto belum diunggah. */
+function ProductThumb({ uri, onError, size = 48 }: { uri?: string | null; onError: () => void; size?: number }) {
+  return (
+    <View
+      className="rounded-chip overflow-hidden bg-background border border-line items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={{ width: size, height: size }}
+          resizeMode="cover"
+          onError={onError}
+          accessibilityIgnoresInvertColors
+        />
+      ) : (
+        <Ionicons name="image-outline" size={20} color="#6B7280" />
+      )}
+    </View>
+  );
+}
+
+function ReceiptRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="flex-row justify-between items-start mb-1.5">
+      <Text className="font-body text-muted text-sm mr-3">{label}</Text>
+      <Text className="font-body-medium text-text text-sm flex-1 text-right">{value}</Text>
     </View>
   );
 }

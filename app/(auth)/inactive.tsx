@@ -10,9 +10,9 @@ export default function InactiveScreen() {
 
   return (
     <View className="flex-1 justify-center items-center px-6 bg-background">
-      <View className="w-full max-w-sm bg-surface rounded-card p-6 border border-line shadow-sm items-center">
+      <View className="w-full max-w-sm bg-surface rounded-card p-6 border border-line items-center">
         {/* Warning Icon */}
-        <View className="w-18 h-18 rounded-full bg-amber-500/10 items-center justify-center mb-4 border border-amber-500/20">
+        <View className="w-[72px] h-[72px] rounded-full bg-warning-soft items-center justify-center mb-4 border border-warning/30">
           <Ionicons name="pause-circle-outline" size={42} color="#B45309" />
         </View>
 
@@ -37,8 +37,8 @@ export default function InactiveScreen() {
           </View>
         )}
 
-        <View className="w-full bg-amber-500/10 rounded-chip p-3 mb-5 border border-amber-500/20">
-          <Text className="font-body text-amber-900 text-xs text-center leading-4">
+        <View className="w-full bg-warning-soft rounded-chip p-3 mb-5 border border-warning/30">
+          <Text className="font-body text-warning text-xs text-center leading-4">
             Silakan hubungi Manajer atau Pengurus Fantasi Coffee apabila Anda merasa penonaktifan ini tidak disengaja.
           </Text>
         </View>

@@ -16,6 +16,8 @@ module.exports = {
         text: "#1F2937",
         muted: "#6B7280",
         line: "#E5E7EB",
+        // Batas kolom isian: minimal 3:1 terhadap putih/background (WCAG 1.4.11).
+        "line-strong": "#8A8F98",
         success: "#166534",
         "success-soft": "#DCFCE7",
         danger: "#991B1B",

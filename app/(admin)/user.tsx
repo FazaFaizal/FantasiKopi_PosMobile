@@ -23,6 +23,7 @@ import { useAdminSidebar } from '../../components/SidebarDrawer';
 import { LoadingState, EmptyState, ErrorState } from '../../components/States';
 import { Ionicons } from '@expo/vector-icons';
 import { useResponsive } from '../../hooks/useResponsive';
+import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 import {
   validateStaffAccountPayload,
   getLinkableEmployees,
@@ -48,6 +49,7 @@ export default function UserAccountScreen() {
   const { openSidebar } = useAdminSidebar();
   const { user: currentUser } = useAuth();
   const { isTablet, columns } = useResponsive();
+  const sheetPadBottom = useSheetBottomPadding(24);
   const router = useRouter();
   // Dibuka dari menu Karyawan → "Buat Akun Login" (employeeId terpilih).
   const params = useLocalSearchParams<{ employeeId?: string }>();
@@ -345,7 +347,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
 
     return (
       <View
-        className="bg-surface rounded-card p-4 mb-3.5 border border-line shadow-sm"
+        className="bg-surface rounded-card p-4 mb-3.5 border border-line"
         style={columns > 1 ? { flex: 1 } : undefined}
       >
         <View className="flex-row items-center mb-2.5">
@@ -354,7 +356,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
               item.role === 'Admin'
                 ? 'bg-primary/10 border-primary/20'
                 : item.role === 'Kasir'
-                ? 'bg-amber-500/15 border-amber-500/30'
+                ? 'bg-warning-soft border-warning/30'
                 : 'bg-surface border-line'
             }`}
           >
@@ -394,7 +396,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
             accessibilityLabel={isAktif ? `Nonaktifkan akun ${item.email}` : `Aktifkan akun ${item.email}`}
             onPress={() => handleToggleStatus(item)}
             className={`min-h-11 px-3 py-2 rounded-button border border-line flex-row items-center ${
-              isAktif ? 'bg-amber-500/10' : 'bg-success-soft'
+              isAktif ? 'bg-warning-soft' : 'bg-success-soft'
             }`}
           >
             <Ionicons
@@ -404,7 +406,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
             />
             <Text
               className={`font-body-medium text-xs ml-1.5 ${
-                isAktif ? 'text-amber-800' : 'text-success'
+                isAktif ? 'text-warning' : 'text-success'
               }`}
             >
               {isAktif ? 'Nonaktifkan' : 'Aktifkan'}
@@ -448,7 +450,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
       >
         {/* Search bar & Add Internal User */}
         <View className="flex-row gap-2 mb-3 items-center">
-          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line flex-row items-center">
+          <View className="flex-1 min-h-12 bg-surface rounded-input px-3.5 border border-line-strong flex-row items-center">
             <Ionicons name="search-outline" size={18} color="#6B7280" />
             <TextInput
               placeholder="Cari email, nama customer, atau karyawan..."
@@ -552,7 +554,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                   ? 'rounded-card p-6 shadow-xl border border-line'
                   : 'rounded-t-card p-6 border-t border-line'
               }`}
-              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%' }}
+              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%', paddingBottom: sheetPadBottom }}
             >
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -579,8 +581,8 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                 </Text>
 
                 {isSelf(selectedUser) && (
-                  <View className="bg-amber-50 border border-amber-200 rounded-chip p-3 mb-4">
-                    <Text className="font-body text-amber-800 text-xs leading-4">
+                  <View className="bg-warning-soft border border-warning/30 rounded-chip p-3 mb-4">
+                    <Text className="font-body text-warning text-xs leading-4">
                       Ini akun Anda sendiri. Role dan status tidak dapat diubah di sini; minta Admin lain bila perlu.
                     </Text>
                   </View>
@@ -648,7 +650,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                           </TouchableOpacity>
                         );
                       })}
-                    <Text className="font-body text-muted text-[11px] mt-1">
+                    <Text className="font-body text-muted text-xs mt-1">
                       Hanya karyawan aktif yang belum punya akun yang dapat dipilih.
                     </Text>
                   </View>
@@ -704,7 +706,7 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
                   ? 'rounded-card p-6 shadow-xl border border-line'
                   : 'rounded-t-card p-6 border-t border-line'
               }`}
-              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%' }}
+              style={isTablet ? { width: '100%', maxWidth: 580, maxHeight: '85%' } : { maxHeight: '85%', paddingBottom: sheetPadBottom }}
             >
               <ScrollView
                 showsVerticalScrollIndicator={false}
@@ -765,12 +767,12 @@ Jika hanya ingin memblokir sementara, gunakan Nonaktifkan.`,
 
                 <View className="mb-6">
                   <Text className="font-body-medium text-text text-sm mb-1">Data Karyawan *</Text>
-                  <Text className="font-body text-muted text-[11px] mb-2">
+                  <Text className="font-body text-muted text-xs mb-2">
                     Akun karyawan dibuat berdasarkan data karyawan. Hanya karyawan aktif yang belum punya akun yang tampil.
                   </Text>
                   {getLinkableEmployees(employees, userLinks).length === 0 ? (
-                    <View className="bg-amber-50 border border-amber-200 rounded-chip p-3">
-                      <Text className="font-body text-amber-800 text-xs leading-4">
+                    <View className="bg-warning-soft border border-warning/30 rounded-chip p-3">
+                      <Text className="font-body text-warning text-xs leading-4">
                         Belum ada karyawan aktif tanpa akun. Tambahkan data karyawan terlebih dahulu di menu Karyawan.
                       </Text>
                     </View>

@@ -13,7 +13,7 @@ import {
 
 const TONE_STYLE: Record<ActivityTone, { bg: string; color: string }> = {
   success: { bg: 'bg-success-soft', color: '#166534' },
-  warning: { bg: 'bg-amber-50', color: '#B45309' },
+  warning: { bg: 'bg-warning-soft', color: '#B45309' },
   danger: { bg: 'bg-danger-soft', color: '#991B1B' },
   neutral: { bg: 'bg-background', color: '#4B5563' },
 };
@@ -80,7 +80,7 @@ export function RecentActivityCard({ refreshKey = 0 }: RecentActivityCardProps) 
         })}
       </View>
 
-      <View className="bg-surface rounded-card border border-line p-3 shadow-sm">
+      <View className="bg-surface rounded-card border border-line p-3">
         {loading ? (
           <View className="py-6 items-center">
             <ActivityIndicator color="#D1001F" />
@@ -111,11 +111,11 @@ export function RecentActivityCard({ refreshKey = 0 }: RecentActivityCardProps) 
                   <Text className="font-heading-semibold text-text text-xs" numberOfLines={2}>
                     {view.title}
                   </Text>
-                  <Text className="font-body text-muted text-[11px] mt-0.5" numberOfLines={2}>
+                  <Text className="font-body text-muted text-xs mt-0.5" numberOfLines={2}>
                     {view.detail}
                   </Text>
                 </View>
-                <Text className="font-body text-muted text-[11px]">{formatActivityTime(row.occurred_at, now)}</Text>
+                <Text className="font-body text-muted text-xs">{formatActivityTime(row.occurred_at, now)}</Text>
               </TouchableOpacity>
             );
           })

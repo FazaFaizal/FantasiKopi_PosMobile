@@ -88,7 +88,7 @@ export default function ReportScreen() {
         }
       >
         {/* Tab Switcher: Sales vs Financial */}
-        <View className="flex-row bg-surface rounded-card p-1 border border-line mb-4 shadow-sm">
+        <View className="flex-row bg-surface rounded-card p-1 border border-line mb-4">
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Tampilkan laporan penjualan"
@@ -186,7 +186,7 @@ export default function ReportScreen() {
             <View className={isTablet ? "flex-row flex-wrap justify-between gap-3 mb-4" : "gap-3 mb-4"}>
               {/* Card 1: Omzet Penjualan */}
               <View
-                className="bg-surface rounded-card p-4 border border-line shadow-sm"
+                className="bg-surface rounded-card p-4 border border-line"
                 style={isTablet ? { width: "48%" } : undefined}
               >
                 <View className="flex-row items-center justify-between mb-2">
@@ -205,7 +205,7 @@ export default function ReportScreen() {
 
               {/* Card 2: Pesanan Lunas */}
               <View
-                className="bg-surface rounded-card p-4 border border-line shadow-sm"
+                className="bg-surface rounded-card p-4 border border-line"
                 style={isTablet ? { width: "48%" } : undefined}
               >
                 <View className="flex-row items-center justify-between mb-2">
@@ -224,12 +224,12 @@ export default function ReportScreen() {
 
               {/* Card 3: Total Item Terjual */}
               <View
-                className="bg-surface rounded-card p-4 border border-line shadow-sm"
+                className="bg-surface rounded-card p-4 border border-line"
                 style={isTablet ? { width: "48%" } : undefined}
               >
                 <View className="flex-row items-center justify-between mb-2">
                   <Text className="font-body text-muted text-xs">Item Terjual</Text>
-                  <View className="w-8 h-8 rounded-full bg-amber-500/10 items-center justify-center">
+                  <View className="w-8 h-8 rounded-full bg-warning-soft items-center justify-center">
                     <Ionicons name="cafe-outline" size={16} color="#B45309" />
                   </View>
                 </View>
@@ -243,12 +243,12 @@ export default function ReportScreen() {
 
               {/* Card 4: Rata-Rata Order (AOV) */}
               <View
-                className="bg-surface rounded-card p-4 border border-line shadow-sm"
+                className="bg-surface rounded-card p-4 border border-line"
                 style={isTablet ? { width: "48%" } : undefined}
               >
                 <View className="flex-row items-center justify-between mb-2">
                   <Text className="font-body text-muted text-xs">Rata-Rata per Nota (AOV)</Text>
-                  <View className="w-8 h-8 rounded-full bg-blue-500/10 items-center justify-center">
+                  <View className="w-8 h-8 rounded-full bg-background items-center justify-center">
                     <Ionicons name="analytics-outline" size={16} color="#1D4ED8" />
                   </View>
                 </View>
@@ -262,7 +262,7 @@ export default function ReportScreen() {
             </View>
 
             {/* Top 5 Best Selling Products Section */}
-            <View className="bg-surface rounded-card p-4 border border-line shadow-sm">
+            <View className="bg-surface rounded-card p-4 border border-line">
               <View className="flex-row justify-between items-center mb-3 pb-2 border-b border-line">
                 <View className="flex-row items-center">
                   <Ionicons name="ribbon-outline" size={18} color="#D1001F" />
@@ -339,10 +339,10 @@ export default function ReportScreen() {
           <View>
             {/* Net Result Hero Card */}
             <View
-              className={`rounded-card p-5 mb-4 border shadow-sm ${
+              className={`rounded-card p-5 mb-4 border ${
                 financialReport.netProfit >= 0
-                  ? "bg-emerald-50 border-emerald-200"
-                  : "bg-red-50 border-red-200"
+                  ? "bg-success-soft border-success/30"
+                  : "bg-danger-soft border-danger/30"
               }`}
             >
               <View className="flex-row justify-between items-start mb-2">
@@ -350,8 +350,8 @@ export default function ReportScreen() {
                   <Text
                     className={`font-body text-xs ${
                       financialReport.netProfit >= 0
-                        ? "text-emerald-800"
-                        : "text-red-800"
+                        ? "text-success"
+                        : "text-danger"
                     }`}
                   >
                     Laba Bersih Kedai (Net Result)
@@ -359,8 +359,8 @@ export default function ReportScreen() {
                   <Text
                     className={`font-heading text-3xl mt-1 ${
                       financialReport.netProfit >= 0
-                        ? "text-emerald-900"
-                        : "text-red-900"
+                        ? "text-success"
+                        : "text-danger"
                     }`}
                   >
                     {financialReport.netProfit >= 0 ? "+ " : "- "}
@@ -369,17 +369,17 @@ export default function ReportScreen() {
                 </View>
 
                 <View
-                  className={`px-3 py-1 rounded-full border ${
+                  className={`px-3 py-1 rounded-chip border ${
                     financialReport.netProfit >= 0
-                      ? "bg-emerald-100 border-emerald-300"
-                      : "bg-red-100 border-red-300"
+                      ? "bg-success-soft border-success/30"
+                      : "bg-danger-soft border-danger/30"
                   }`}
                 >
                   <Text
                     className={`font-heading-semibold text-xs ${
                       financialReport.netProfit >= 0
-                        ? "text-emerald-800"
-                        : "text-red-800"
+                        ? "text-success"
+                        : "text-danger"
                     }`}
                   >
                     {financialReport.netProfit >= 0 ? "Surplus " : "Defisit "}
@@ -391,8 +391,8 @@ export default function ReportScreen() {
               <Text
                 className={`font-body text-xs mt-1 leading-4 ${
                   financialReport.netProfit >= 0
-                    ? "text-emerald-700"
-                    : "text-red-700"
+                    ? "text-success"
+                    : "text-danger"
                 }`}
               >
                 Rumus PRD Section 22: Laba Bersih = Total Penjualan ({formatRupiah(financialReport.totalSales)}) dikurangi Total Biaya ({formatRupiah(financialReport.totalExpenses)}).
@@ -401,7 +401,7 @@ export default function ReportScreen() {
 
             {/* Income vs Expense 2 Columns */}
             <View className="flex-row gap-3 mb-4">
-              <View className="flex-1 bg-surface rounded-card p-4 border border-line shadow-sm">
+              <View className="flex-1 bg-surface rounded-card p-4 border border-line">
                 <View className="flex-row items-center mb-1">
                   <View className="w-2.5 h-2.5 rounded-full bg-success mr-1.5" />
                   <Text className="font-body text-muted text-xs">Total Penjualan</Text>
@@ -411,7 +411,7 @@ export default function ReportScreen() {
                 </Text>
               </View>
 
-              <View className="flex-1 bg-surface rounded-card p-4 border border-line shadow-sm">
+              <View className="flex-1 bg-surface rounded-card p-4 border border-line">
                 <View className="flex-row items-center mb-1">
                   <View className="w-2.5 h-2.5 rounded-full bg-danger mr-1.5" />
                   <Text className="font-body text-muted text-xs">Total Biaya Operasional</Text>
@@ -423,7 +423,7 @@ export default function ReportScreen() {
             </View>
 
             {/* Alokasi Biaya Pengeluaran per Kategori */}
-            <View className="bg-surface rounded-card p-4 border border-line shadow-sm">
+            <View className="bg-surface rounded-card p-4 border border-line">
               <View className="flex-row justify-between items-center mb-3 pb-2 border-b border-line">
                 <View className="flex-row items-center">
                   <Ionicons name="pie-chart-outline" size={18} color="#D1001F" />
