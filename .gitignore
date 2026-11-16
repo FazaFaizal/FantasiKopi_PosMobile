@@ -82,3 +82,11 @@ skills-lock.json
 # Temporary artifacts
 /temp_app/
 
+# Hasil build Android (APK/AAB dibagikan langsung, bukan lewat repo)
+*.apk
+*.aab
+
+# Dokumen internal (PRD dan laporan audit antislop), hanya disimpan lokal
+/prd.md
+/anti-slop/
+

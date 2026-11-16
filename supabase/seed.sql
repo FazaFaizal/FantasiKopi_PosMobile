@@ -8,6 +8,35 @@
 -- 1. Inisialisasi Ekstensi Kriptografi
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Akun Admin/Kasir wajib terhubung dengan satu data karyawan aktif
+-- (trigger guard_user_account_rules). Fungsi sementara ini mengembalikan
+-- karyawan yang sudah terhubung, atau yang ber-email sama, atau membuat baru.
+CREATE OR REPLACE FUNCTION pg_temp.seed_employee(p_email TEXT, p_name TEXT, p_position TEXT)
+RETURNS UUID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_id UUID;
+BEGIN
+    SELECT employee_id INTO v_id FROM public.users WHERE email = p_email AND employee_id IS NOT NULL;
+    IF v_id IS NULL THEN
+        SELECT e.id INTO v_id
+          FROM public.employees e
+         WHERE e.email = p_email
+           AND NOT EXISTS (SELECT 1 FROM public.users u WHERE u.employee_id = e.id)
+         LIMIT 1;
+    END IF;
+    IF v_id IS NULL THEN
+        INSERT INTO public.employees (name, email, position, status)
+        VALUES (p_name, p_email, p_position, 'Aktif')
+        RETURNING id INTO v_id;
+    ELSE
+        UPDATE public.employees SET status = 'Aktif' WHERE id = v_id AND status <> 'Aktif';
+    END IF;
+    RETURN v_id;
+END;
+$$;
+
 -- 2. Akun Super Administrator
 --    Email: admin@faza.com
 --    Password: password123
@@ -62,9 +91,11 @@ BEGIN
         );
 
         -- Update atau insert role Admin pada public.users
-        INSERT INTO public.users (id, email, role, status)
-        VALUES (new_user_id, admin_email, 'Admin', 'Aktif')
-        ON CONFLICT (id) DO UPDATE SET role = 'Admin', status = 'Aktif';
+        INSERT INTO public.users (id, email, role, status, employee_id)
+        VALUES (new_user_id, admin_email, 'Admin', 'Aktif',
+                pg_temp.seed_employee(admin_email, 'Super Administrator', 'Admin'))
+        ON CONFLICT (id) DO UPDATE
+            SET role = 'Admin', status = 'Aktif', employee_id = EXCLUDED.employee_id;
     ELSE
         -- Jika auth user sudah ada, perbaiki kolom NULL (mencegah error 500 Database error querying schema)
         UPDATE auth.users
@@ -82,7 +113,10 @@ BEGIN
         WHERE email = admin_email;
 
         -- Pastikan role di public.users adalah Admin
-        UPDATE public.users SET role = 'Admin', status = 'Aktif' WHERE email = admin_email;
+        UPDATE public.users
+           SET role = 'Admin', status = 'Aktif',
+               employee_id = pg_temp.seed_employee(admin_email, 'Super Administrator', 'Admin')
+         WHERE email = admin_email;
     END IF;
 END $$;
 
@@ -130,9 +164,11 @@ BEGIN
             now()
         );
 
-        INSERT INTO public.users (id, email, role, status)
-        VALUES (kasir_user_id, kasir_email, 'Kasir', 'Aktif')
-        ON CONFLICT (id) DO UPDATE SET role = 'Kasir', status = 'Aktif';
+        INSERT INTO public.users (id, email, role, status, employee_id)
+        VALUES (kasir_user_id, kasir_email, 'Kasir', 'Aktif',
+                pg_temp.seed_employee(kasir_email, 'Kasir Fantasi Coffee', 'Kasir'))
+        ON CONFLICT (id) DO UPDATE
+            SET role = 'Kasir', status = 'Aktif', employee_id = EXCLUDED.employee_id;
     ELSE
         UPDATE auth.users
         SET confirmation_token = COALESCE(confirmation_token, ''),
@@ -148,7 +184,10 @@ BEGIN
             email_confirmed_at = COALESCE(email_confirmed_at, now())
         WHERE email = kasir_email;
 
-        UPDATE public.users SET role = 'Kasir', status = 'Aktif' WHERE email = kasir_email;
+        UPDATE public.users
+           SET role = 'Kasir', status = 'Aktif',
+               employee_id = pg_temp.seed_employee(kasir_email, 'Kasir Fantasi Coffee', 'Kasir')
+         WHERE email = kasir_email;
     END IF;
 END $$;
 

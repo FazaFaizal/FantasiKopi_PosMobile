@@ -57,7 +57,7 @@ jest.mock("@react-native-community/netinfo", () => ({
   useNetInfo: jest.fn(() => ({ isConnected: true, isInternetReachable: true })),
 }));
 
-// Mock react-native-svg for lucide-react-native
+// Mock react-native-svg (modul native, tidak tersedia di Jest)
 jest.mock("react-native-svg", () => {
   const React = require("react");
   const SvgMock = ({ testID, ...props }) => React.createElement("svg", props, props.children);
