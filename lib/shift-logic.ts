@@ -49,15 +49,6 @@ export function validateOpenShift(input: {
   };
 }
 
-export function calculateShiftExpectedCash(input: {
-  openingCash: number;
-  cashIn: number;
-  cashRefunds: number;
-  cashExpenses: number;
-}): number {
-  return input.openingCash + input.cashIn - input.cashRefunds - input.cashExpenses;
-}
-
 export function validateCloseShift(input: {
   countedText: string;
   withdrawnText: string;

@@ -19,17 +19,6 @@ export const CUSTOMER_MAX_ITEM_QUANTITY = 99;
 /** Jumlah maksimal menu berbeda dalam satu pesanan. */
 export const CUSTOMER_MAX_DISTINCT_PRODUCTS = 10;
 
-/**
- * Status awal pesanan customer (PRD Section 16 & 25, revisi).
- * Customer tidak bisa menandai pembayarannya sendiri sebagai lunas, termasuk QRIS:
- * pembayaran selalu dikonfirmasi kasir (cek uang tunai / mutasi QRIS di aplikasi merchant).
- */
-export function getCustomerOrderInitialStatus(
-  _paymentMethod: PaymentMethod
-): { order_status: OrderStatus; payment_status: PaymentStatus } {
-  return { order_status: 'Pending', payment_status: 'Pending' };
-}
-
 export interface CustomerCartItem {
   productId: string;
   productName: string;

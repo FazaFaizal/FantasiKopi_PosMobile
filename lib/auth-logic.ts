@@ -57,32 +57,6 @@ export function canDeleteUserAccount(
 }
 
 /**
- * Validates employee input data
- */
-export function validateEmployeeInput(
-  name: string,
-  phone?: string | null,
-): { isValid: boolean; errors: { name?: string; phone?: string } } {
-  const errors: { name?: string; phone?: string } = {};
-
-  if (!name || !name.trim()) {
-    errors.name = "Nama karyawan wajib diisi";
-  }
-
-  if (phone && phone.trim()) {
-    const phoneRegex = /^[0-9+\-\s]{8,20}$/;
-    if (!phoneRegex.test(phone.trim())) {
-      errors.phone = "Nomor telepon tidak valid";
-    }
-  }
-
-  return {
-    isValid: Object.keys(errors).length === 0,
-    errors,
-  };
-}
-
-/**
  * Route protection and role authorization
  */
 export function checkRoleRouteAccess(
@@ -102,20 +76,6 @@ export function checkRoleRouteAccess(
   }
 
   return true;
-}
-
-/**
- * Synchronization rule (PRD Section 8):
- * If employee status becomes Nonaktif, user account becomes Nonaktif.
- */
-export function syncEmployeeStatusToUser(
-  employeeStatus: AccountStatus,
-  currentAccountStatus: AccountStatus,
-): AccountStatus {
-  if (employeeStatus === "Nonaktif") {
-    return "Nonaktif";
-  }
-  return currentAccountStatus;
 }
 
 /**

@@ -27,6 +27,7 @@ import {
   validateStockInPurchase,
   buildRecordStockInParams,
   buildStockMovementParams,
+  validateInventoryItemInput,
 } from '../../lib/inventory-logic';
 import { formatRupiah } from '../../lib/formatters';
 import { StockInPurchaseFields } from '../../components/StockInPurchaseFields';
@@ -120,17 +121,16 @@ export default function KasirInventoryScreen() {
 
   const handleSaveItem = async () => {
     setNameError('');
-    const cleanName = name.trim();
-    if (!cleanName) {
-      setNameError('Nama bahan baku wajib diisi');
+    const check = validateInventoryItemInput(name, minStock);
+    if (check.errors.name) {
+      setNameError(check.errors.name);
       return;
     }
-
-    const numMin = Number(minStock);
-    if (isNaN(numMin) || numMin < 0) {
-      Alert.alert('Validasi', 'Minimum stock harus berupa angka valid (>= 0)');
+    if (!check.value) {
+      Alert.alert('Validasi', check.errors.minStock ?? '');
       return;
     }
+    const { name: cleanName, minStock: numMin } = check.value;
 
     setSubmittingItem(true);
     try {

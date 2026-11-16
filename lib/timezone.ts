@@ -8,8 +8,7 @@
  * Indonesia tidak memakai daylight saving time, sehingga offset tetap.
  */
 
-export const BUSINESS_TIMEZONE = 'Asia/Makassar';
-export const BUSINESS_TIMEZONE_LABEL = 'WITA';
+/** Asia/Makassar (WITA, UTC+8). */
 const BUSINESS_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 /** Tanggal bisnis (YYYY-MM-DD) dari sebuah waktu. */

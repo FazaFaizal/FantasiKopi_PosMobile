@@ -22,7 +22,13 @@ import { ScreenHeader } from "../../components/ScreenHeader";
 import { useAdminSidebar } from "../../components/SidebarDrawer";
 import { LoadingState, EmptyState, ErrorState } from "../../components/States";
 import { Ionicons } from "@expo/vector-icons";
-import { canDeleteCategory, canDeactivateCategory } from "../../lib/category-logic";
+import {
+  canDeleteCategory,
+  canDeactivateCategory,
+  filterCategories,
+  toggleCategoryStatus,
+  validateCategoryInput,
+} from "../../lib/category-logic";
 import { useResponsive } from "../../hooks/useResponsive";
 import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 
@@ -116,8 +122,9 @@ export default function CategoryScreen() {
   const handleSave = async () => {
     setNameError("");
     const cleanName = name.trim();
-    if (!cleanName) {
-      setNameError("Nama kategori wajib diisi");
+    const nameCheck = validateCategoryInput(cleanName);
+    if (!nameCheck.isValid) {
+      setNameError(nameCheck.error ?? "");
       return;
     }
 
@@ -173,7 +180,7 @@ export default function CategoryScreen() {
 
   const handleToggleStatus = (cat: CategoryWithCount) => {
     const isAktif = cat.status === "Aktif";
-    const newStatus = isAktif ? "Nonaktif" : "Aktif";
+    const newStatus = toggleCategoryStatus(cat.status);
 
     if (isAktif) {
       const guard = canDeactivateCategory(cat.name, cat.product_count || 0);
@@ -257,15 +264,7 @@ export default function CategoryScreen() {
     );
   };
 
-  const filteredCategories = categories.filter((cat) => {
-    if (statusFilter !== "Semua" && cat.status !== statusFilter) return false;
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      cat.name.toLowerCase().includes(q) ||
-      (cat.description && cat.description.toLowerCase().includes(q))
-    );
-  });
+  const filteredCategories = filterCategories(categories, searchQuery, statusFilter);
 
   const renderItem = ({ item }: { item: CategoryWithCount }) => {
     const isAktif = item.status === "Aktif";

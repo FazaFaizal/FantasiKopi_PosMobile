@@ -1,8 +1,8 @@
 # User Acceptance Test (UAT) per Iterasi
 
 **Aplikasi:** Fantasi Coffee Mobile POS
-**Acuan:** `prd.md` bagian 5 (Scope & Development Iteration) dan bagian 35 (Iteration Acceptance Criteria)
-**Versi dokumen:** 1.0, 15 November 2026
+**Acuan:** `prd.md` bagian 5 (Scope & Development Iteration) dan bagian 35 (Iteration Acceptance Criteria). Kriteria Iterasi 3 dan 4 lama di PRD dibagi ulang menjadi Iterasi 3, 4, dan 5 di dokumen ini.
+**Versi dokumen:** 1.1, 16 November 2026
 
 ---
 
@@ -18,7 +18,7 @@ Satu iterasi **diterima** bila semua skenario berprioritas **Wajib** berstatus L
 2. Jalankan skenario berurutan per iterasi. Beberapa skenario memakai data dari skenario sebelumnya (ditulis di kolom Langkah).
 3. Isi kolom **Hasil aktual** dengan apa yang terlihat di layar, lalu isi **Status**:
    - **L** = Lulus, hasil sama dengan yang diharapkan.
-   - **G** = Gagal, hasil berbeda. Catat di Lembar Temuan (bagian 9).
+   - **G** = Gagal, hasil berbeda. Catat di Lembar Temuan (bagian 10).
    - **B** = Diblokir, skenario tidak bisa dijalankan (misalnya skenario sebelumnya gagal).
 4. Di akhir iterasi, isi Lembar Pengesahan.
 
@@ -118,145 +118,151 @@ Buat akun uji khusus, jangan memakai akun operasional kedai. Isi tabel ini sebel
 | I2-21 | Penting   | Admin / Kasir | Stok hanya berubah lewat mutasi                 | Edit bahan baku dan cari kolom angka stok.                                                                                    | Angka stok tidak bisa diketik langsung, hanya lewat mutasi.                                                   |              |        |
 | I2-22 | Wajib     | Kasir         | Kasir tidak bisa hapus bahan                    | Login KSR-1, cari tombol hapus bahan baku.                                                                                    | Tidak ada tombol hapus.                                                                                       |              |        |
 | I2-23 | Wajib     | Admin         | Admin hapus bahan                               | Login ADM-1, hapus "Gula Uji".                                                                                                | Bahan terhapus. Riwayat mutasinya tetap terbaca dengan nama bahan.                                            |              |        |
-| I2-24 | Penting   | Admin / Kasir | Stock In sebagai pembelian                      | (Butuh sif aktif untuk Kasir, lihat I3-01) Stock In 1000 dan centang **Ini pembelian, catat sebagai biaya**, isi total harga. | Stok bertambah dan satu Expense Raw Material tercatat hari ini dengan deskripsi "Pembelian Susu Uji 1000 ml". |              |        |
+| I2-24 | Penting   | Admin / Kasir | Stock In sebagai pembelian                      | (Butuh sif aktif untuk Kasir, lihat I4-02) Stock In 1000 dan centang **Ini pembelian, catat sebagai biaya**, isi total harga. | Stok bertambah dan satu Expense Raw Material tercatat hari ini dengan deskripsi "Pembelian Susu Uji 1000 ml". |              |        |
 | I2-25 | Tambahan  | Admin         | Peringatan stok di dashboard                    | Pastikan ada bahan Low Stock atau Habis, buka Dashboard.                                                                      | Muncul kotak **Peringatan Stok Bahan Baku**. Mengetuknya membuka halaman bahan baku.                          |              |        |
 
 ---
 
-## 6. Iterasi 3: POS, Order & Financial Report
+## 6. Iterasi 3: Manajemen Pesanan POS
 
-**Kriteria penerimaan (PRD 35):** Kasir membuat Order; Cart benar; total benar; Payment tercatat; Order dan Order Item tersimpan; Kasir mengubah status Order; Admin dan Kasir membatalkan Order dan memproses refund; riwayat Order dapat dilihat; Admin melihat Sales Report, mengelola Expense, melihat Financial Report.
+**Kriteria penerimaan (PRD 35):** Kasir mengubah status Order; Admin dan Kasir membatalkan Order dan memproses refund; riwayat Transaction/Order dapat dilihat.
 
-**Prasyarat:** Iterasi 2 diterima. Minimal 3 produk Tersedia dan 1 produk Tidak Tersedia. Catat harga produk untuk menghitung total manual.
+**Prasyarat:** Iterasi 2 diterima. KSR-1 punya sif aktif (refund hanya bisa diproses saat ada sif aktif), dan sudah ada minimal 5 order lunas berstatus Processing yang dibuat lewat POS, salah satunya dibayar Tunai. Order ini hanya data uji: pembukaan sif diuji di Iterasi 4 dan transaksi POS di Iterasi 5.
 
-### 6.1 Sif dan kas
-
-| ID    | Prioritas | Peran | Skenario                      | Langkah                                                                             | Hasil yang diharapkan                                                 | Hasil aktual | Status |
-| ----- | --------- | ----- | ----------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------ | ------ |
-| I3-01 | Wajib     | Kasir | POS terkunci tanpa sif        | Login KSR-1 tanpa sif aktif.                                                        | Layar "Sif kasir belum dibuka" dan tombol **Buka Sif di Kas Harian**. |              |        |
-| I3-02 | Wajib     | Kasir | Buka sif                      | Tekan **Buka Sif di Kas Harian** > **Buka Sif**, isi modal awal (misalnya 200.000). | Sif aktif. POS terbuka.                                               |              |        |
-| I3-03 | Penting   | Kasir | Modal beda dari sisa sif lalu | (Setelah ada sif sebelumnya) isi modal berbeda dari saran sistem.                   | Catatan menjadi wajib sebelum sif bisa dibuka.                        |              |        |
-| I3-04 | Penting   | Kasir | Hanya satu sif aktif          | Dari perangkat lain (ADM-1 atau kasir lain) coba buka sif kedua.                    | Ditolak.                                                              |              |        |
-
-### 6.2 POS dan Cart
-
-| ID    | Prioritas | Peran | Skenario                         | Langkah                                                            | Hasil yang diharapkan                                                             | Hasil aktual | Status |
-| ----- | --------- | ----- | -------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ------------ | ------ |
-| I3-05 | Wajib     | Kasir | Cari dan filter menu             | Ketik nama menu; pilih chip kategori.                              | Hanya menu yang sesuai tampil.                                                    |              |        |
-| I3-06 | Wajib | Kasir | Tambah ke keranjang | Ketuk kartu 2 produk (bagian mana pun selain pil Tersedia/Habis), salah satunya 2 kali. | Keranjang berisi 2 baris, salah satunya jumlah 2. Tablet: badge angka di pojok kartu. HP: label "2 di keranjang" di sebelah harga. |  |  |
-| I3-07 | Wajib     | Kasir | Produk habis tidak bisa ditambah | Ketuk produk berstatus Habis.                                      | Tidak masuk keranjang. Kartu tampak nonaktif.                                     |              |        |
-| I3-08 | Wajib     | Kasir | Ubah jumlah dan hapus            | Tekan + dan − pada item, lalu ikon tempat sampah.                  | Jumlah dan total berubah. Item terhapus.                                          |              |        |
-| I3-09 | Wajib     | Kasir | Total benar                      | Bandingkan total di layar dengan hitungan manual (harga × jumlah). | Sama persis.                                                                      |              |        |
-| I3-10 | Penting   | Kasir | Kosongkan keranjang              | Tekan **Kosongkan keranjang**, konfirmasi.                         | Keranjang kosong.                                                                 |              |        |
-| I3-11 | Tambahan | Kasir | Catatan item | Di keranjang, ketuk nama item, isi catatan "less sugar", **Simpan Catatan**. | Catatan tampil di bawah harga item (item tanpa catatan tidak menampilkan kolom catatan) dan ikut tampil di struk. |  |  |
-| I3-12 | Tambahan  | Kasir | Mode ponsel                      | Jalankan I3-06 di HP.                                              | Bar keranjang mengambang muncul, **Lihat & Bayar** membuka keranjang layar penuh. |              |        |
-
-### 6.3 Pembayaran dan Order
-
-| ID    | Prioritas | Peran | Skenario                        | Langkah                                                                                                 | Hasil yang diharapkan                                                                                                               | Hasil aktual | Status |
-| ----- | --------- | ----- | ------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I3-13 | Wajib | Kasir | Bayar tunai dengan kembalian | Pilih Dine In, isi meja/nama, metode **Tunai**, tekan **Bayar**. Di modal "Terima pembayaran tunai" isi uang diterima lebih besar dari total (atau ketuk chip pecahan), lalu **Konfirmasi Bayar**. | Kembalian di modal dihitung benar. Setelah konfirmasi, struk "Transaksi Berhasil" menampilkan nomor order, jam, item, total, uang diterima, kembalian. |  |  |
-| I3-14 | Wajib | Kasir | Uang kurang | Di modal "Terima pembayaran tunai", isi uang diterima kurang dari total. | Tombol **Konfirmasi Bayar** tidak aktif, muncul keterangan uang kurang, kembalian "-". |  |  |
-| I3-15 | Wajib | Kasir | Bayar QRIS dan Debit (di kasir) | Buat 2 order: metode QRIS lalu Debit, tekan **Bayar**. | Tanpa modal uang diterima; order langsung tersimpan Lunas dengan metode masing-masing. |  |  |
-| I3-16 | Wajib     | Kasir | Order dan item tersimpan        | Buka **Riwayat Transaksi**, buka detail order I3-13.                                                    | Nomor order, waktu, pelanggan, tipe, item (nama, jumlah, harga), total, metode, status bayar Lunas, status order Processing.        |              |        |
-| I3-17 | Penting   | Admin | Harga order tidak ikut berubah  | Ubah harga produk yang ada di I3-13, buka lagi detail order I3-13.                                      | Detail order tetap memakai harga lama.                                                                                              |              |        |
-| I3-18 | Penting   | Kasir | Produk habis saat bayar         | Tambah produk ke keranjang, lalu (dari perangkat lain) ubah produk itu jadi Tidak Tersedia, lalu bayar. | Order ditolak seluruhnya. Tidak ada order setengah tersimpan.                                                                       |              |        |
-
-### 6.4 Status, pembatalan, refund
-
-| ID    | Prioritas | Peran         | Skenario                            | Langkah                                                                                                          | Hasil yang diharapkan                                                                                   | Hasil aktual | Status |
-| ----- | --------- | ------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I3-19 | Wajib     | Kasir         | Ubah status order                   | Detail order Processing > **Tandai Siap (Ready)** > **Selesaikan**.                                              | Status berubah Processing → Ready → Completed.                                                          |              |        |
-| I3-20 | Penting   | Kasir         | Selesaikan semua yang siap          | Buat 2 order, tandai keduanya Ready, tekan **Selesaikan Pesanan Siap**.                                          | Keduanya Completed.                                                                                     |              |        |
-| I3-21 | Wajib     | Kasir         | Batal + refund order lunas          | Detail order Processing yang Tunai > **Batalkan Pesanan & Refund**, isi alasan > **Ya, Batalkan**.               | Order Cancelled, status bayar **Dikembalikan (Refunded)**. Alasan, pelaku, waktu tercatat.              |              |        |
-| I3-22 | Penting   | Kasir         | Alasan wajib                        | Coba batalkan tanpa alasan.                                                                                      | Ditolak.                                                                                                |              |        |
-| I3-23 | Wajib     | Admin / Kasir | Order selesai tidak bisa dibatalkan | Buka order Completed atau Cancelled.                                                                             | Tidak ada tombol batalkan.                                                                              |              |        |
-| I3-24 | Wajib     | Admin         | Admin membatalkan order             | Login ADM-1 > **Pesanan** > batalkan satu order Processing.                                                      | Berhasil seperti I3-21.                                                                                 |              |        |
-| I3-25 | Penting   | Admin         | Koreksi metode bayar                | Admin > **Pesanan** > order lunas > **Koreksi Metode Pembayaran** (misalnya Tunai → QRIS).                       | Metode berubah, catatan koreksi (siapa, lama → baru) tercatat. Kasir tidak punya tombol ini.            |              |        |
-| I3-26 | Wajib     | Admin / Kasir | Riwayat order                       | Buka Riwayat Transaksi / Pesanan, gulir ke bawah, tekan **Muat lebih banyak** bila ada, pakai filter "Hari ini". | Semua order uji tampil dengan nomor, waktu, pelanggan, tipe, total, metode, status bayar, status order. |              |        |
-
-### 6.5 Expense, kas harian, tutup sif
-
-| ID    | Prioritas | Peran | Skenario                            | Langkah                                                                                     | Hasil yang diharapkan                                                                                                                                                        | Hasil aktual | Status |
-| ----- | --------- | ----- | ----------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I3-27 | Wajib     | Admin | Tambah expense                      | Sidebar > **Biaya Operasional** > tambah expense Operational 50.000, dibayar dari kas laci. | Tersimpan dan tampil di daftar.                                                                                                                                              |              |        |
-| I3-28 | Wajib     | Admin | Ubah dan hapus expense              | Ubah nominal, lalu hapus (dengan konfirmasi).                                               | Berhasil.                                                                                                                                                                    |              |        |
-| I3-29 | Penting   | Admin | Filter dan kelompok expense         | Filter periode dan kategori.                                                                | Hanya expense yang sesuai tampil, total per kategori benar.                                                                                                                  |              |        |
-| I3-30 | Penting   | Kasir | Kasir catat pengeluaran harian      | Kas Harian > **Catat Pengeluaran Harian** (misalnya es batu 20.000).                        | Tercatat hari ini atas nama Kasir. Kasir tidak bisa mengubah atau menghapusnya.                                                                                              |              |        |
-| I3-31 | Wajib     | Kasir | Rekap kas harian                    | Buka **Kas Harian**.                                                                        | Uang seharusnya di laci = modal + tunai diterima − refund tunai − pengeluaran dari kas. QRIS/Debit tampil terpisah dan tidak menambah laci. Cocokkan dengan hitungan manual. |              |        |
-| I3-32 | Wajib     | Kasir | Tutup sif tanpa selisih             | **Tutup Sif & Hitung Kas**, isi uang fisik sama dengan kas seharusnya.                      | Sif tertutup, POS terkunci lagi.                                                                                                                                             |              |        |
-| I3-33 | Penting   | Kasir | Tutup sif dengan selisih            | Buka sif baru, lalu tutup dengan uang fisik berbeda.                                        | Catatan selisih wajib diisi. Selisih tercatat di riwayat sif.                                                                                                                |              |        |
-| I3-34 | Penting   | Admin | Admin menutup sif yang lupa ditutup | Biarkan sif KSR-1 terbuka, tutup dari akun ADM-1.                                           | Berhasil.                                                                                                                                                                    |              |        |
-
-### 6.6 Laporan
-
-| ID    | Prioritas | Peran | Skenario                        | Langkah                                                                         | Hasil yang diharapkan                                                                                                                                      | Hasil aktual | Status |
-| ----- | --------- | ----- | ------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I3-35 | Wajib     | Admin | Sales Report hari ini           | Sidebar > **Laporan & Finansial**, periode hari ini.                            | Total order, produk terjual, total penjualan, produk terlaris. Hanya order **lunas dan tidak dibatalkan** yang dihitung. Cocokkan dengan daftar order uji. |              |        |
-| I3-36 | Wajib     | Admin | Rentang tanggal                 | Pilih rentang beberapa hari.                                                    | Angka mengikuti rentang yang dipilih.                                                                                                                      |              |        |
-| I3-37 | Wajib     | Admin | Financial Report                | Lihat ringkasan keuangan periode yang sama.                                     | Net Result = Total Sales − Total Expense. Cocokkan dengan hitungan manual.                                                                                 |              |        |
-| I3-38 | Penting   | Admin | Order dibatalkan tidak dihitung | Bandingkan laporan sebelum dan sesudah membatalkan satu order lunas.            | Penjualan turun sebesar order yang dibatalkan.                                                                                                             |              |        |
-| I3-39 | Penting   | Admin | Batas hari WITA                 | Buat order mendekati 00:00 WITA (atau periksa order lama sekitar tengah malam). | Order masuk ke tanggal pembayaran WITA, bukan tanggal perangkat.                                                                                           |              |        |
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I3-01 | Wajib     | Kasir         | Ubah status order                   | Detail order Processing > **Tandai Siap (Ready)** > **Selesaikan**.                                              | Status berubah Processing → Ready → Completed.                                                          |              |        |
+| I3-02 | Penting   | Kasir         | Selesaikan semua yang siap          | Buat 2 order, tandai keduanya Ready, tekan **Selesaikan Pesanan Siap**.                                          | Keduanya Completed.                                                                                     |              |        |
+| I3-03 | Wajib     | Kasir         | Batal + refund order lunas          | Detail order Processing yang Tunai > **Batalkan Pesanan & Refund**, isi alasan > **Ya, Batalkan**.               | Order Cancelled, status bayar **Dikembalikan (Refunded)**. Alasan, pelaku, waktu tercatat.              |              |        |
+| I3-04 | Penting   | Kasir         | Alasan wajib                        | Coba batalkan tanpa alasan.                                                                                      | Ditolak.                                                                                                |              |        |
+| I3-05 | Wajib     | Admin / Kasir | Order selesai tidak bisa dibatalkan | Buka order Completed atau Cancelled.                                                                             | Tidak ada tombol batalkan.                                                                              |              |        |
+| I3-06 | Wajib     | Admin         | Admin membatalkan order             | Login ADM-1 > **Pesanan** > batalkan satu order Processing.                                                      | Berhasil seperti I3-03.                                                                                 |              |        |
+| I3-07 | Penting   | Admin         | Koreksi metode bayar                | Admin > **Pesanan** > order lunas > **Koreksi Metode Pembayaran** (misalnya Tunai → QRIS).                       | Metode berubah, catatan koreksi (siapa, lama → baru) tercatat. Kasir tidak punya tombol ini.            |              |        |
+| I3-08 | Wajib     | Admin / Kasir | Riwayat order                       | Buka Riwayat Transaksi / Pesanan, gulir ke bawah, tekan **Muat lebih banyak** bila ada, pakai filter "Hari ini". | Semua order uji tampil dengan nomor, waktu, pelanggan, tipe, total, metode, status bayar, status order. |              |        |
 
 ---
 
-## 7. Iterasi 4: Customer Ordering & Admin Dashboard
+## 7. Iterasi 4: Laporan Pemasukan & Pengeluaran, Menu Pelanggan, Keranjang Customer, Dashboard
 
-**Kriteria penerimaan (PRD 35):** Customer melihat Product, memakai Cart, Checkout, membuat Order, melihat Order dan statusnya; Admin Dashboard menampilkan data aktual tentang Sales, Order, Inventory, dan Financial.
+**Kriteria penerimaan (PRD 35):** Admin melihat Sales Report, mengelola Expense, dan melihat Financial Report; Customer melihat Product dan memakai Cart; Admin Dashboard menampilkan data aktual tentang Sales, Order, Inventory, dan Financial.
 
-**Prasyarat:** Iterasi 3 diterima. KSR-1 punya sif aktif. CUS-1 dan CUS-2 aktif. Midtrans Sandbox siap.
+**Prasyarat:** Iterasi 3 diterima. Order uji dari Iterasi 3 (lunas dan dibatalkan) masih ada. CUS-1 aktif. Untuk I4-01, sif dari Iterasi 3 sudah ditutup.
 
-### 7.1 Katalog dan keranjang Customer
+### 7.1 Sif kasir
 
-| ID    | Prioritas | Peran    | Skenario                        | Langkah                                                                                                      | Hasil yang diharapkan                                                                                                      | Hasil aktual | Status |
-| ----- | --------- | -------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I4-01 | Wajib     | Customer | Lihat katalog                   | Login CUS-1.                                                                                                 | Daftar menu dengan kategori, harga, dan status. Menu Habis tampil tetapi tidak bisa dipesan. Produk nonaktif tidak tampil. |              |        |
-| I4-02 | Wajib     | Customer | Cari dan filter                 | Ketik nama menu; pilih kategori.                                                                             | Hanya menu yang sesuai tampil.                                                                                             |              |        |
-| I4-03 | Penting   | Customer | Detail menu                     | Tahan kartu menu.                                                                                            | Detail tampil (foto, nama, kategori, harga, status, deskripsi). Lepas jari, detail tertutup.                               |              |        |
-| I4-04 | Wajib     | Customer | Tambah ke keranjang             | Tekan **Pesan** pada 2 menu, isi catatan pada salah satunya.                                                 | Bar keranjang menampilkan jumlah item dan total.                                                                           |              |        |
-| I4-05 | Wajib     | Customer | Ubah dan hapus item             | Buka keranjang, ubah jumlah, hapus satu item, lalu **Kosongkan**.                                            | Subtotal dan total mengikuti. Keranjang bisa dikosongkan.                                                                  |              |        |
-| I4-06 | Penting   | Customer | Harga berubah saat di keranjang | Isi keranjang. Admin mengubah harga menu tersebut. Customer tarik ke bawah untuk memperbarui, lalu checkout. | Customer diberi tahu perubahan, dan total akhir pesanan memakai harga terbaru.                                             |              |        |
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I4-01 | Wajib     | Kasir | POS terkunci tanpa sif        | Login KSR-1 tanpa sif aktif.                                                        | Layar "Sif kasir belum dibuka" dan tombol **Buka Sif di Kas Harian**. |              |        |
+| I4-02 | Wajib     | Kasir | Buka sif                      | Tekan **Buka Sif di Kas Harian** > **Buka Sif**, isi modal awal (misalnya 200.000). | Sif aktif. POS terbuka.                                               |              |        |
+| I4-03 | Penting   | Kasir | Modal beda dari sisa sif lalu | (Setelah ada sif sebelumnya) isi modal berbeda dari saran sistem.                   | Catatan menjadi wajib sebelum sif bisa dibuka.                        |              |        |
+| I4-04 | Penting   | Kasir | Hanya satu sif aktif          | Dari perangkat lain (ADM-1 atau kasir lain) coba buka sif kedua.                    | Ditolak.                                                              |              |        |
 
-### 7.2 Checkout dan pembayaran di kasir
+### 7.2 Pengeluaran, kas harian, tutup sif
 
-| ID    | Prioritas | Peran            | Skenario                       | Langkah                                                                                            | Hasil yang diharapkan                                                                                                                             | Hasil aktual | Status |
-| ----- | --------- | ---------------- | ------------------------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I4-07 | Wajib     | Customer         | Checkout bayar di kasir        | Keranjang > Dine In, nomor meja, nama pemesan, **Tunai di Kasir** > **Konfirmasi & Buat Pesanan**. | Muncul "Pesanan Berhasil Dibuat" dengan nomor pesanan, total, dan batas bayar 15 menit.                                                           |              |        |
-| I4-08 | Wajib | Kasir | Notifikasi pesanan masuk | Di tablet kasir (layar apa pun) saat I4-07 dibuat. Lalu di POS ketuk ikon lonceng di header. | Banner "Pesanan baru" muncul. Lonceng di header POS dan menu Riwayat Transaksi menampilkan angka pesanan. Panel lonceng menampilkan pesanan di kelompok "Menunggu pembayaran" dengan sisa waktu bayar. |  |  |
-| I4-09 | Wajib | Kasir | Terima pembayaran | Ketuk banner, atau ketuk pesanan di panel lonceng, lalu **Konfirmasi Pembayaran & Proses**. | Detail pesanan langsung terbuka di Riwayat Transaksi. Setelah konfirmasi, order Lunas dan Processing, dan angka lonceng berkurang. |  |  |
-| I4-10 | Wajib     | Customer         | Lihat pesanan dan status       | CUS-1 > **Pesanan** (Pesanan Saya).                                                                | Pesanan tampil dengan status "Sedang Disiapkan". Saat kasir ubah ke Ready dan Completed, status berubah ke "Siap Diambil" lalu "Selesai".         |              |        |
-| I4-11 | Wajib     | Customer         | Hanya pesanan milik sendiri    | Login CUS-2, buka Pesanan Saya.                                                                    | Pesanan CUS-1 tidak tampil.                                                                                                                       |              |        |
-| I4-12 | Penting   | Customer         | Batalkan pesanan belum dibayar | Buat pesanan bayar di kasir, lalu batalkan dari Pesanan Saya dengan alasan (minimal 3 karakter).   | Pesanan Cancelled, status bayar tetap belum dibayar. Setelah dibayar/diproses, tombol batal tidak tersedia.                                       |              |        |
-| I4-13 | Penting   | Customer         | Batas 1 pesanan belum dibayar  | CUS-2 buat pesanan bayar di kasir, lalu coba buat pesanan kedua sebelum membayar.                  | Ditolak dengan keterangan pesanan yang belum dibayar.                                                                                             |              |        |
-| I4-14 | Penting   | Customer         | Batas jumlah                   | Isi 1 menu dengan jumlah 100, atau 11 menu berbeda.                                                | Ditolak (maksimal 99 per menu, 10 menu berbeda).                                                                                                  |              |        |
-| I4-15 | Penting   | Customer / Kasir | Kedaluwarsa 15 menit           | Buat pesanan bayar di kasir, jangan dibayar selama 15 menit.                                       | Pesanan otomatis Cancelled dengan alasan tidak dibayar. Kasir tidak bisa lagi menerima pembayarannya. Customer melihat hitung mundur sebelum itu. |              |        |
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I4-05 | Wajib     | Admin | Tambah expense                      | Sidebar > **Biaya Operasional** > tambah expense Operational 50.000, dibayar dari kas laci. | Tersimpan dan tampil di daftar.                                                                                                                                              |              |        |
+| I4-06 | Wajib     | Admin | Ubah dan hapus expense              | Ubah nominal, lalu hapus (dengan konfirmasi).                                               | Berhasil.                                                                                                                                                                    |              |        |
+| I4-07 | Penting   | Admin | Filter dan kelompok expense         | Filter periode dan kategori.                                                                | Hanya expense yang sesuai tampil, total per kategori benar.                                                                                                                  |              |        |
+| I4-08 | Penting   | Kasir | Kasir catat pengeluaran harian      | Kas Harian > **Catat Pengeluaran Harian** (misalnya es batu 20.000).                        | Tercatat hari ini atas nama Kasir. Kasir tidak bisa mengubah atau menghapusnya.                                                                                              |              |        |
+| I4-09 | Wajib     | Kasir | Rekap kas harian                    | Buka **Kas Harian**.                                                                        | Uang seharusnya di laci = modal + tunai diterima − refund tunai − pengeluaran dari kas. QRIS/Debit tampil terpisah dan tidak menambah laci. Cocokkan dengan hitungan manual. |              |        |
+| I4-10 | Wajib     | Kasir | Tutup sif tanpa selisih             | **Tutup Sif & Hitung Kas**, isi uang fisik sama dengan kas seharusnya.                      | Sif tertutup, POS terkunci lagi.                                                                                                                                             |              |        |
+| I4-11 | Penting   | Kasir | Tutup sif dengan selisih            | Buka sif baru, lalu tutup dengan uang fisik berbeda.                                        | Catatan selisih wajib diisi. Selisih tercatat di riwayat sif.                                                                                                                |              |        |
+| I4-12 | Penting   | Admin | Admin menutup sif yang lupa ditutup | Biarkan sif KSR-1 terbuka, tutup dari akun ADM-1.                                           | Berhasil.                                                                                                                                                                    |              |        |
 
-### 7.3 QRIS Online (Midtrans Sandbox)
+### 7.3 Laporan pemasukan dan pengeluaran
 
-| ID    | Prioritas | Peran    | Skenario                | Langkah                                                                             | Hasil yang diharapkan                                                                                                                                   | Hasil aktual | Status |
-| ----- | --------- | -------- | ----------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I4-16 | Wajib     | Customer | Bayar QRIS Online       | Checkout dengan **QRIS Online** > **Buat Pesanan & Bayar QRIS**.                    | Layar **Bayar QRIS** menampilkan gambar QR, total, dan hitung mundur 3 menit.                                                                           |              |        |
-| I4-17 | Wajib     | Customer | Pembayaran berhasil     | Bayar lewat simulator QRIS Midtrans Sandbox (pakai **Bagikan link QR** bila perlu). | Layar berganti otomatis ke **Pembayaran Berhasil**. Pesanan Lunas dan Processing.                                                                       |              |        |
-| I4-18 | Wajib     | Kasir    | Pesanan online di kasir | Amati kasir sebelum dan sesudah I4-17.                                              | Sebelum lunas, pesanan tidak tampil di kasir. Setelah lunas, banner "Pesanan online lunas" muncul. Kasir tidak bisa menandai lunas secara manual.       |              |        |
-| I4-19 | Penting   | Customer | QR kedaluwarsa          | Buat pesanan QRIS Online, jangan bayar selama 3 menit.                              | Layar **Batas Waktu Pembayaran Habis**, pesanan Cancelled dengan status bayar Gagal. Customer tidak bisa membatalkan pesanan QRIS Online secara manual. |              |        |
-| I4-20 | Penting   | Kasir    | Tidak butuh sif         | Tutup sif, lalu ulangi I4-16 dan I4-17.                                             | Pembayaran online tetap berhasil tanpa sif aktif.                                                                                                       |              |        |
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I4-13 | Wajib     | Admin | Sales Report hari ini           | Sidebar > **Laporan & Finansial**, periode hari ini.                            | Total order, produk terjual, total penjualan, produk terlaris. Hanya order **lunas dan tidak dibatalkan** yang dihitung. Cocokkan dengan daftar order uji. |              |        |
+| I4-14 | Wajib     | Admin | Rentang tanggal                 | Pilih rentang beberapa hari.                                                    | Angka mengikuti rentang yang dipilih.                                                                                                                      |              |        |
+| I4-15 | Wajib     | Admin | Financial Report                | Lihat ringkasan keuangan periode yang sama.                                     | Net Result = Total Sales − Total Expense. Cocokkan dengan hitungan manual.                                                                                 |              |        |
+| I4-16 | Penting   | Admin | Order dibatalkan tidak dihitung | Bandingkan laporan sebelum dan sesudah membatalkan satu order lunas.            | Penjualan turun sebesar order yang dibatalkan.                                                                                                             |              |        |
+| I4-17 | Penting   | Admin | Batas hari WITA                 | Buat order mendekati 00:00 WITA (atau periksa order lama sekitar tengah malam). | Order masuk ke tanggal pembayaran WITA, bukan tanggal perangkat.                                                                                           |              |        |
 
-### 7.4 Dashboard Admin
+### 7.4 Menu dan keranjang Customer
 
-| ID    | Prioritas | Peran | Skenario                            | Langkah                                                                                  | Hasil yang diharapkan                                                                                                                             | Hasil aktual | Status |
-| ----- | --------- | ----- | ----------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
-| I4-21 | Wajib     | Admin | Angka hari ini sesuai laporan       | Buka Dashboard dan Laporan hari ini.                                                     | Omzet, biaya, laba bersih, dan produk terlaris sama persis di kedua halaman.                                                                      |              |        |
-| I4-22 | Wajib     | Admin | Data order                          | Lihat **Pesanan Masuk**, jumlah menunggu bayar, dan **Pesanan Terbaru**.                 | Sama dengan order uji hari ini. **Semua Pesanan** membuka halaman Pesanan.                                                                        |              |        |
-| I4-23 | Wajib     | Admin | Data stok                           | Lihat peringatan stok dan baris Bahan baku di **Data Master**.                           | Jumlah Aman / Menipis / Habis sesuai halaman Bahan Baku.                                                                                          |              |        |
-| I4-24 | Penting   | Admin | Aktivitas Operasional               | Lihat daftar aktivitas, pakai filter Semua / Kas / Pesanan / Stok, ketuk satu aktivitas. | Buka/tutup sif, pembatalan/refund, koreksi metode, mutasi stok, dan pengeluaran dari skenario sebelumnya tampil. Ketukan membuka halaman terkait. |              |        |
-| I4-25 | Penting   | Admin | Data dimuat ulang                   | Buat order baru dari kasir, kembali ke Dashboard (atau tarik ke bawah).                  | Angka bertambah tanpa menutup aplikasi. Badge "Diperbarui" menunjukkan jam terbaru.                                                               |              |        |
-| I4-26 | Penting   | Admin | Gagal memuat tidak tampil sebagai 0 | Matikan internet, tarik dashboard ke bawah.                                              | Muncul pesan error dan tombol coba lagi. Tidak ada omzet Rp 0 yang tampak seperti data asli.                                                      |              |        |
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I4-18 | Wajib     | Customer | Lihat katalog                   | Login CUS-1.                                                                                                 | Daftar menu dengan kategori, harga, dan status. Menu Habis tampil tetapi tidak bisa dipesan. Produk nonaktif tidak tampil. |              |        |
+| I4-19 | Wajib     | Customer | Cari dan filter                 | Ketik nama menu; pilih kategori.                                                                             | Hanya menu yang sesuai tampil.                                                                                             |              |        |
+| I4-20 | Penting   | Customer | Detail menu                     | Tahan kartu menu.                                                                                            | Detail tampil (foto, nama, kategori, harga, status, deskripsi). Lepas jari, detail tertutup.                               |              |        |
+| I4-21 | Wajib     | Customer | Tambah ke keranjang             | Tekan **Pesan** pada 2 menu, isi catatan pada salah satunya.                                                 | Bar keranjang menampilkan jumlah item dan total.                                                                           |              |        |
+| I4-22 | Wajib     | Customer | Ubah dan hapus item             | Buka keranjang, ubah jumlah, hapus satu item, lalu **Kosongkan**.                                            | Subtotal dan total mengikuti. Keranjang bisa dikosongkan.                                                                  |              |        |
+
+### 7.5 Dashboard Admin
+
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I4-23 | Wajib     | Admin | Angka hari ini sesuai laporan       | Buka Dashboard dan Laporan hari ini.                                                     | Omzet, biaya, laba bersih, dan produk terlaris sama persis di kedua halaman.                                                                      |              |        |
+| I4-24 | Wajib     | Admin | Data order                          | Lihat **Pesanan Masuk**, jumlah menunggu bayar, dan **Pesanan Terbaru**.                 | Sama dengan order uji hari ini. **Semua Pesanan** membuka halaman Pesanan.                                                                        |              |        |
+| I4-25 | Wajib     | Admin | Data stok                           | Lihat peringatan stok dan baris Bahan baku di **Data Master**.                           | Jumlah Aman / Menipis / Habis sesuai halaman Bahan Baku.                                                                                          |              |        |
+| I4-26 | Penting   | Admin | Aktivitas Operasional               | Lihat daftar aktivitas, pakai filter Semua / Kas / Pesanan / Stok, ketuk satu aktivitas. | Buka/tutup sif, pembatalan/refund, koreksi metode, mutasi stok, dan pengeluaran dari skenario sebelumnya tampil. Ketukan membuka halaman terkait. |              |        |
+| I4-27 | Penting   | Admin | Data dimuat ulang                   | Buat order baru dari kasir, kembali ke Dashboard (atau tarik ke bawah).                  | Angka bertambah tanpa menutup aplikasi. Badge "Diperbarui" menunjukkan jam terbaru.                                                               |              |        |
+| I4-28 | Penting   | Admin | Gagal memuat tidak tampil sebagai 0 | Matikan internet, tarik dashboard ke bawah.                                              | Muncul pesan error dan tombol coba lagi. Tidak ada omzet Rp 0 yang tampak seperti data asli.                                                      |              |        |
 
 ---
 
-## 8. Uji lintas iterasi (tampilan, perangkat, aksesibilitas)
+## 8. Iterasi 5: Transaksi POS, Checkout & Pembayaran Customer
 
-Dijalankan sekali setelah Iterasi 4, di HP dan tablet.
+**Kriteria penerimaan (PRD 35):** Kasir membuat Order; Cart benar; total benar; Payment tercatat; Order dan Order Item tersimpan; Customer melakukan Checkout, membuat Order, dan melihat Order miliknya beserta statusnya.
+
+**Prasyarat:** Iterasi 4 diterima. KSR-1 punya sif aktif. Minimal 3 produk Tersedia dan 1 produk Tidak Tersedia. Catat harga produk untuk menghitung total manual. CUS-1 dan CUS-2 aktif. Midtrans Sandbox siap.
+
+### 8.1 POS dan keranjang Kasir
+
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I5-01 | Wajib     | Kasir | Cari dan filter menu             | Ketik nama menu; pilih chip kategori.                              | Hanya menu yang sesuai tampil.                                                    |              |        |
+| I5-02 | Wajib | Kasir | Tambah ke keranjang | Ketuk kartu 2 produk (bagian mana pun selain pil Tersedia/Habis), salah satunya 2 kali. | Keranjang berisi 2 baris, salah satunya jumlah 2. Tablet: badge angka di pojok kartu. HP: label "2 di keranjang" di sebelah harga. |  |  |
+| I5-03 | Wajib     | Kasir | Produk habis tidak bisa ditambah | Ketuk produk berstatus Habis.                                      | Tidak masuk keranjang. Kartu tampak nonaktif.                                     |              |        |
+| I5-04 | Wajib     | Kasir | Ubah jumlah dan hapus            | Tekan + dan − pada item, lalu ikon tempat sampah.                  | Jumlah dan total berubah. Item terhapus.                                          |              |        |
+| I5-05 | Wajib     | Kasir | Total benar                      | Bandingkan total di layar dengan hitungan manual (harga × jumlah). | Sama persis.                                                                      |              |        |
+| I5-06 | Penting   | Kasir | Kosongkan keranjang              | Tekan **Kosongkan keranjang**, konfirmasi.                         | Keranjang kosong.                                                                 |              |        |
+| I5-07 | Tambahan | Kasir | Catatan item | Di keranjang, ketuk nama item, isi catatan "less sugar", **Simpan Catatan**. | Catatan tampil di bawah harga item (item tanpa catatan tidak menampilkan kolom catatan) dan ikut tampil di struk. |  |  |
+| I5-08 | Tambahan  | Kasir | Mode ponsel                      | Jalankan I5-02 di HP.                                              | Bar keranjang mengambang muncul, **Lihat & Bayar** membuka keranjang layar penuh. |              |        |
+
+### 8.2 Pembayaran di POS
+
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I5-09 | Wajib | Kasir | Bayar tunai dengan kembalian | Pilih Dine In, isi meja/nama, metode **Tunai**, tekan **Bayar**. Di modal "Terima pembayaran tunai" isi uang diterima lebih besar dari total (atau ketuk chip pecahan), lalu **Konfirmasi Bayar**. | Kembalian di modal dihitung benar. Setelah konfirmasi, struk "Transaksi Berhasil" menampilkan nomor order, jam, item, total, uang diterima, kembalian. |  |  |
+| I5-10 | Wajib | Kasir | Uang kurang | Di modal "Terima pembayaran tunai", isi uang diterima kurang dari total. | Tombol **Konfirmasi Bayar** tidak aktif, muncul keterangan uang kurang, kembalian "-". |  |  |
+| I5-11 | Wajib | Kasir | Bayar QRIS dan Debit (di kasir) | Buat 2 order: metode QRIS lalu Debit, tekan **Bayar**. | Tanpa modal uang diterima; order langsung tersimpan Lunas dengan metode masing-masing. |  |  |
+| I5-12 | Wajib     | Kasir | Order dan item tersimpan        | Buka **Riwayat Transaksi**, buka detail order I5-09.                                                    | Nomor order, waktu, pelanggan, tipe, item (nama, jumlah, harga), total, metode, status bayar Lunas, status order Processing.        |              |        |
+| I5-13 | Penting   | Admin | Harga order tidak ikut berubah  | Ubah harga produk yang ada di I5-09, buka lagi detail order I5-09.                                      | Detail order tetap memakai harga lama.                                                                                              |              |        |
+| I5-14 | Penting   | Kasir | Produk habis saat bayar         | Tambah produk ke keranjang, lalu (dari perangkat lain) ubah produk itu jadi Tidak Tersedia, lalu bayar. | Order ditolak seluruhnya. Tidak ada order setengah tersimpan.                                                                       |              |        |
+
+### 8.3 Checkout Customer dan bayar di kasir
+
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I5-15 | Penting   | Customer | Harga berubah saat di keranjang | Isi keranjang. Admin mengubah harga menu tersebut. Customer tarik ke bawah untuk memperbarui, lalu checkout. | Customer diberi tahu perubahan, dan total akhir pesanan memakai harga terbaru.                                             |              |        |
+| I5-16 | Wajib     | Customer         | Checkout bayar di kasir        | Keranjang > Dine In, nomor meja, nama pemesan, **Tunai di Kasir** > **Konfirmasi & Buat Pesanan**. | Muncul "Pesanan Berhasil Dibuat" dengan nomor pesanan, total, dan batas bayar 15 menit.                                                           |              |        |
+| I5-17 | Wajib | Kasir | Notifikasi pesanan masuk | Di tablet kasir (layar apa pun) saat I5-16 dibuat. Lalu di POS ketuk ikon lonceng di header. | Banner "Pesanan baru" muncul. Lonceng di header POS dan menu Riwayat Transaksi menampilkan angka pesanan. Panel lonceng menampilkan pesanan di kelompok "Menunggu pembayaran" dengan sisa waktu bayar. |  |  |
+| I5-18 | Wajib | Kasir | Terima pembayaran | Ketuk banner, atau ketuk pesanan di panel lonceng, lalu **Konfirmasi Pembayaran & Proses**. | Detail pesanan langsung terbuka di Riwayat Transaksi. Setelah konfirmasi, order Lunas dan Processing, dan angka lonceng berkurang. |  |  |
+| I5-19 | Wajib     | Customer         | Lihat pesanan dan status       | CUS-1 > **Pesanan** (Pesanan Saya).                                                                | Pesanan tampil dengan status "Sedang Disiapkan". Saat kasir ubah ke Ready dan Completed, status berubah ke "Siap Diambil" lalu "Selesai".         |              |        |
+| I5-20 | Wajib     | Customer         | Hanya pesanan milik sendiri    | Login CUS-2, buka Pesanan Saya.                                                                    | Pesanan CUS-1 tidak tampil.                                                                                                                       |              |        |
+| I5-21 | Penting   | Customer         | Batalkan pesanan belum dibayar | Buat pesanan bayar di kasir, lalu batalkan dari Pesanan Saya dengan alasan (minimal 3 karakter).   | Pesanan Cancelled, status bayar tetap belum dibayar. Setelah dibayar/diproses, tombol batal tidak tersedia.                                       |              |        |
+| I5-22 | Penting   | Customer         | Batas 1 pesanan belum dibayar  | CUS-2 buat pesanan bayar di kasir, lalu coba buat pesanan kedua sebelum membayar.                  | Ditolak dengan keterangan pesanan yang belum dibayar.                                                                                             |              |        |
+| I5-23 | Penting   | Customer         | Batas jumlah                   | Isi 1 menu dengan jumlah 100, atau 11 menu berbeda.                                                | Ditolak (maksimal 99 per menu, 10 menu berbeda).                                                                                                  |              |        |
+| I5-24 | Penting   | Customer / Kasir | Kedaluwarsa 15 menit           | Buat pesanan bayar di kasir, jangan dibayar selama 15 menit.                                       | Pesanan otomatis Cancelled dengan alasan tidak dibayar. Kasir tidak bisa lagi menerima pembayarannya. Customer melihat hitung mundur sebelum itu. |              |        |
+
+### 8.4 QRIS Online (Midtrans Sandbox)
+
+| ID | Prioritas | Peran | Skenario | Langkah | Hasil yang diharapkan | Hasil aktual | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| I5-25 | Wajib     | Customer | Bayar QRIS Online       | Checkout dengan **QRIS Online** > **Buat Pesanan & Bayar QRIS**.                    | Layar **Bayar QRIS** menampilkan gambar QR, total, dan hitung mundur 3 menit.                                                                           |              |        |
+| I5-26 | Wajib     | Customer | Pembayaran berhasil     | Bayar lewat simulator QRIS Midtrans Sandbox (pakai **Bagikan link QR** bila perlu). | Layar berganti otomatis ke **Pembayaran Berhasil**. Pesanan Lunas dan Processing.                                                                       |              |        |
+| I5-27 | Wajib     | Kasir    | Pesanan online di kasir | Amati kasir sebelum dan sesudah I5-26.                                              | Sebelum lunas, pesanan tidak tampil di kasir. Setelah lunas, banner "Pesanan online lunas" muncul. Kasir tidak bisa menandai lunas secara manual.       |              |        |
+| I5-28 | Penting   | Customer | QR kedaluwarsa          | Buat pesanan QRIS Online, jangan bayar selama 3 menit.                              | Layar **Batas Waktu Pembayaran Habis**, pesanan Cancelled dengan status bayar Gagal. Customer tidak bisa membatalkan pesanan QRIS Online secara manual. |              |        |
+| I5-29 | Penting   | Kasir    | Tidak butuh sif         | Tutup sif, lalu ulangi I5-25 dan I5-26.                                             | Pembayaran online tetap berhasil tanpa sif aktif.                                                                                                       |              |        |
+
+---
+
+## 9. Uji lintas iterasi (tampilan, perangkat, aksesibilitas)
+
+Dijalankan sekali setelah Iterasi 5, di HP dan tablet.
 
 | ID   | Prioritas | Skenario          | Langkah                                                                                                          | Hasil yang diharapkan                                                                                                                                          | Hasil aktual | Status |
 | ---- | --------- | ----------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ |
@@ -270,7 +276,7 @@ Dijalankan sekali setelah Iterasi 4, di HP dan tablet.
 
 ---
 
-## 9. Lembar temuan
+## 10. Lembar temuan
 
 Catat setiap skenario berstatus G di sini.
 
@@ -288,7 +294,7 @@ Tingkat temuan:
 
 ---
 
-## 10. Lembar pengesahan per iterasi
+## 11. Lembar pengesahan per iterasi
 
 Isi satu blok untuk setiap iterasi.
 
@@ -323,12 +329,13 @@ Catatan penguji:
 
 ---
 
-## 11. Rekap hasil UAT
+## 12. Rekap hasil UAT
 
 | Iterasi                            | Wajib (L/total) | Penting (L/total) | Tambahan (L/total) | Temuan Berat terbuka | Keputusan |
 | ---------------------------------- | --------------- | ----------------- | ------------------ | -------------------- | --------- |
 | 1: Authentication, Employee & User | /13             | /5                | /0                 |                      |           |
 | 2: Product & Inventory             | /15             | /9                | /1                 |                      |           |
-| 3: POS, Order & Financial Report   | /23             | /14               | /2                 |                      |           |
-| 4: Customer Ordering & Dashboard   | /15             | /11               | /0                 |                      |           |
+| 3: Manajemen Pesanan POS           | /5              | /3                | /0                 |                      |           |
+| 4: Laporan, Menu Customer & Dashboard | /16          | /12               | /0                 |                      |           |
+| 5: Transaksi POS, Checkout & Pembayaran | /17        | /10               | /2                 |                      |           |
 | Lintas iterasi                     | /0              | /4                | /3                 |                      |           |

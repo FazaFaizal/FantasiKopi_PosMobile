@@ -27,15 +27,8 @@ export function validateProductInput(
   }
 
   const numPrice = Number(price);
-  if (
-    price === "" ||
-    price === null ||
-    price === undefined ||
-    isNaN(numPrice)
-  ) {
-    errors.price = "Harga produk harus berupa angka";
-  } else if (numPrice < 0) {
-    errors.price = "Harga produk tidak boleh bernilai negatif";
+  if (price === "" || price === null || price === undefined || isNaN(numPrice) || numPrice < 0) {
+    errors.price = "Harga harus berupa angka valid (>= 0)";
   }
 
   return {
@@ -54,46 +47,34 @@ export function toggleProductAvailability(
 }
 
 export interface FilterableProduct {
-  id: string;
   name: string;
   description: string | null;
   category_id: string | null;
   status: "Tersedia" | "Tidak Tersedia";
-  is_active?: boolean;
+  category?: { name: string } | null;
 }
 
 /**
- * Filters product list by search query, category, and availability status
+ * Filter daftar produk Admin: status, kategori ("Semua" = tanpa filter), dan
+ * pencarian pada nama, deskripsi, atau nama kategori.
  */
 export function filterProducts<T extends FilterableProduct>(
   products: T[],
   searchQuery: string,
-  categoryFilterId: string = "all",
+  categoryFilterId: string = "Semua",
   statusFilter: string = "Semua",
 ): T[] {
   const cleanQuery = searchQuery.toLowerCase().trim();
 
   return products.filter((prod) => {
-    // 1. Filter out explicitly inactive products
-    if (prod.is_active === false) return false;
-
-    // 2. Status filter
-    if (statusFilter !== "Semua" && prod.status !== statusFilter) {
-      return false;
-    }
-
-    // 3. Category filter
-    if (categoryFilterId !== "all" && prod.category_id !== categoryFilterId) {
-      return false;
-    }
-
-    // 4. Search query
+    if (statusFilter !== "Semua" && prod.status !== statusFilter) return false;
+    if (categoryFilterId !== "Semua" && prod.category_id !== categoryFilterId) return false;
     if (!cleanQuery) return true;
-    const nameMatch = prod.name.toLowerCase().includes(cleanQuery);
-    const descMatch = prod.description
-      ? prod.description.toLowerCase().includes(cleanQuery)
-      : false;
 
-    return nameMatch || descMatch;
+    return (
+      prod.name.toLowerCase().includes(cleanQuery) ||
+      (prod.description ?? "").toLowerCase().includes(cleanQuery) ||
+      (prod.category?.name ?? "").toLowerCase().includes(cleanQuery)
+    );
   });
 }

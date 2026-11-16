@@ -4,6 +4,8 @@
  * Sesuai PRD Section 21 & Section 22
  */
 
+import { addBusinessDays, getBusinessDateString } from "./timezone";
+
 export type ExpenseCategory =
   | "Raw Material"
   | "Operational"
@@ -123,7 +125,8 @@ export interface ExpenseFilterOptions {
 }
 
 /**
- * Memfilter daftar pengeluaran berdasarkan kategori, pencarian, dan periode waktu
+ * Memfilter daftar pengeluaran berdasarkan kategori, pencarian, dan periode waktu.
+ * "Hari ini" mengikuti tanggal bisnis (WITA), sama dengan tanggal expense_date.
  */
 export function filterExpenses<T extends { description: string; category: string; expense_date: string }>(
   expenses: T[],
@@ -132,13 +135,8 @@ export function filterExpenses<T extends { description: string; category: string
   if (!expenses || expenses.length === 0) return [];
   const { category, searchQuery, period = "Semua", currentDate = new Date() } = filters || {};
 
-  const now = new Date(currentDate);
-  const todayStr = now.toISOString().split("T")[0];
-
-  const sevenDaysAgo = new Date(now);
-  sevenDaysAgo.setDate(now.getDate() - 7);
-  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
-
+  const todayStr = getBusinessDateString(currentDate);
+  const sevenDaysAgoStr = addBusinessDays(todayStr, -7);
   const currentYearMonth = todayStr.substring(0, 7); // YYYY-MM
 
   return expenses.filter((exp) => {

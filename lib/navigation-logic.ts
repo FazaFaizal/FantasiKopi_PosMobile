@@ -52,16 +52,6 @@ export function isRouteActive(activeRoute?: string, targetRoute?: string): boole
   return false;
 }
 
-/**
- * Mengekstrak nama tab sederhana dari rute Expo Router
- * Contoh: `/(admin)/dashboard` -> `dashboard`
- */
-export function resolveTabRouteName(route: string): string {
-  const norm = normalizeRoute(route);
-  const segments = norm.split('/').filter(Boolean);
-  return segments[segments.length - 1] || 'index';
-}
-
 export interface NavigationGuardDecision {
   action: 'redirect' | 'allow';
   targetHref?: string;

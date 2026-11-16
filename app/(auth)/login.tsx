@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
+import { validateEmail } from "../../lib/auth-logic";
 import { Button } from "../../components/Button";
 import { Input } from "../../components/Input";
 import { Link } from "expo-router";
@@ -26,11 +27,9 @@ export default function LoginScreen() {
     setPasswordError("");
 
     const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setEmailError("Email wajib diisi");
-      isValid = false;
-    } else if (!cleanEmail.includes("@")) {
-      setEmailError("Format email tidak valid");
+    const emailCheck = validateEmail(cleanEmail);
+    if (!emailCheck.isValid) {
+      setEmailError(emailCheck.error ?? "");
       isValid = false;
     }
 

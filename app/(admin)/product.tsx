@@ -25,6 +25,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { useResponsive } from "../../hooks/useResponsive";
 import { useSheetBottomPadding } from '../../hooks/useSheetPadding';
 import { formatRupiah } from "../../lib/formatters";
+import {
+  filterProducts,
+  toggleProductAvailability,
+  validateProductInput,
+} from "../../lib/product-logic";
 
 type Product = Database["public"]["Tables"]["products"]["Row"];
 type Category = Database["public"]["Tables"]["categories"]["Row"];
@@ -134,27 +139,12 @@ export default function AdminProductScreen() {
   };
 
   const handleSave = async () => {
-    let isValid = true;
-    setNameError("");
-    setPriceError("");
-    setCategoryError("");
-
     const cleanName = name.trim();
-    if (!cleanName) {
-      setNameError("Nama produk wajib diisi");
-      isValid = false;
-    }
-
     const numPrice = Number(price);
-    if (!price || isNaN(numPrice) || numPrice < 0) {
-      setPriceError("Harga harus berupa angka valid (>= 0)");
-      isValid = false;
-    }
-
-    if (!categoryId) {
-      setCategoryError("Kategori produk wajib dipilih");
-      isValid = false;
-    }
+    const { isValid, errors } = validateProductInput(cleanName, categoryId, price);
+    setNameError(errors.name ?? "");
+    setPriceError(errors.price ?? "");
+    setCategoryError(errors.categoryId ?? "");
 
     if (!isValid) return;
 
@@ -206,8 +196,7 @@ export default function AdminProductScreen() {
   };
 
   const handleToggleAvailability = async (prod: Product) => {
-    const newStatus =
-      prod.status === "Tersedia" ? "Tidak Tersedia" : "Tersedia";
+    const newStatus = toggleProductAvailability(prod.status);
     try {
       const { error } = await supabase
         .from("products")
@@ -258,24 +247,7 @@ export default function AdminProductScreen() {
     );
   };
 
-  const filteredProducts = products.filter((p) => {
-    // Status Filter
-    if (statusFilter !== "Semua" && p.status !== statusFilter) return false;
-    // Category Filter
-    if (
-      selectedCategoryFilter !== "Semua" &&
-      p.category_id !== selectedCategoryFilter
-    )
-      return false;
-    // Search
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      p.name.toLowerCase().includes(q) ||
-      (p.description && p.description.toLowerCase().includes(q)) ||
-      (p.category && p.category.name.toLowerCase().includes(q))
-    );
-  });
+  const filteredProducts = filterProducts(products, searchQuery, selectedCategoryFilter, statusFilter);
 
   const activeCategories = categories.filter((c) => c.status === "Aktif");
 

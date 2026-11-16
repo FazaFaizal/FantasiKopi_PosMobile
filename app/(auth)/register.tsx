@@ -6,7 +6,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { Link, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { validatePassword, PASSWORD_MIN_LENGTH } from '../../lib/auth-logic';
+import { validateEmail, validatePassword, PASSWORD_MIN_LENGTH } from '../../lib/auth-logic';
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -38,11 +38,9 @@ export default function RegisterScreen() {
       isValid = false;
     }
 
-    if (!cleanEmail) {
-      setEmailError('Email wajib diisi');
-      isValid = false;
-    } else if (!cleanEmail.includes('@')) {
-      setEmailError('Format email tidak valid');
+    const emailCheck = validateEmail(cleanEmail);
+    if (!emailCheck.isValid) {
+      setEmailError(emailCheck.error || 'Format email tidak valid');
       isValid = false;
     }
 

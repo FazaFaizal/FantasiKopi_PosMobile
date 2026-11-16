@@ -17,12 +17,3 @@ export function formatRupiah(amount: number): string {
     maximumFractionDigits: 0,
   }).format(amount);
 }
-
-/**
- * Format stock quantity with its unit
- * e.g. (2500, 'gram') -> "2.500 gram"
- */
-export function formatStock(quantity: number, unit: string): string {
-  const formattedNumber = new Intl.NumberFormat("id-ID").format(quantity);
-  return `${formattedNumber} ${unit}`;
-}

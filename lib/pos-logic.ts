@@ -216,20 +216,6 @@ export function validateOrderPayload(payload: {
 }
 
 /**
- * Menghasilkan nomor order berformat ORD-YYYYMMDD-XXXX
- */
-export function generateOrderNumber(
-  date: Date = new Date(),
-  sequence: number = 1
-): string {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const seqPadded = String(sequence).padStart(4, "0");
-  return `ORD-${yyyy}${mm}${dd}-${seqPadded}`;
-}
-
-/**
  * Memfilter katalog produk untuk kasir:
  * - Hanya produk aktif (is_active !== false)
  * - Filter kategori opsional
