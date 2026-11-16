@@ -37,17 +37,17 @@ BEGIN
 END;
 $$;
 
--- 2. Akun Super Administrator
---    Email: admin@faza.com
---    Password: password123
-DO $$
-DECLARE
-    new_user_id UUID := '00000000-0000-0000-0000-000000000001';
-    admin_email TEXT := 'admin@faza.com';
-    admin_password TEXT := 'password123';
+-- Membuat akun Admin/Kasir di auth.users, auth.identities, dan public.users.
+-- Jika auth user sudah ada: kolom token NULL diperbaiki (mencegah error 500
+-- "Database error querying schema") dan password di-reset.
+CREATE OR REPLACE FUNCTION pg_temp.seed_staff_account(
+    p_id UUID, p_email TEXT, p_password TEXT, p_name TEXT, p_role TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = admin_email) THEN
-        -- Insert ke auth.users dengan seluruh kolom token non-null (kompatibilitas GoTrue)
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = p_email) THEN
+        -- Seluruh kolom token non-null (kompatibilitas GoTrue)
         INSERT INTO auth.users (
             instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
             recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
@@ -55,141 +55,74 @@ BEGIN
             recovery_token, phone, phone_change, phone_change_token, reauthentication_token
         ) VALUES (
             '00000000-0000-0000-0000-000000000000',
-            new_user_id,
+            p_id,
             'authenticated',
             'authenticated',
-            admin_email,
-            crypt(admin_password, gen_salt('bf')),
+            p_email,
+            crypt(p_password, gen_salt('bf')),
             now(),
             now(),
             now(),
             '{"provider":"email","providers":["email"]}',
-            '{"name":"Super Administrator"}',
+            jsonb_build_object('name', p_name),
             now(),
             now(),
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            ''
+            -- phone NULL, bukan '': kolom phone unik, '' hanya boleh dipakai satu akun
+            '', '', '', '', NULL, '', '', ''
         );
 
-        -- Insert ke auth.identities
         INSERT INTO auth.identities (
             id, provider_id, user_id, identity_data, provider, created_at, updated_at
         ) VALUES (
             gen_random_uuid(),
-            new_user_id::text,
-            new_user_id,
-            format('{"sub":"%s","email":"%s"}', new_user_id::text, admin_email)::jsonb,
+            p_id::text,
+            p_id,
+            jsonb_build_object('sub', p_id::text, 'email', p_email),
             'email',
             now(),
             now()
         );
 
-        -- Update atau insert role Admin pada public.users
         INSERT INTO public.users (id, email, role, status, employee_id)
-        VALUES (new_user_id, admin_email, 'Admin', 'Aktif',
-                pg_temp.seed_employee(admin_email, 'Super Administrator', 'Admin'))
+        VALUES (p_id, p_email, p_role, 'Aktif', pg_temp.seed_employee(p_email, p_name, p_role))
         ON CONFLICT (id) DO UPDATE
-            SET role = 'Admin', status = 'Aktif', employee_id = EXCLUDED.employee_id;
+            SET role = p_role, status = 'Aktif', employee_id = EXCLUDED.employee_id;
     ELSE
-        -- Jika auth user sudah ada, perbaiki kolom NULL (mencegah error 500 Database error querying schema)
         UPDATE auth.users
         SET confirmation_token = COALESCE(confirmation_token, ''),
             recovery_token = COALESCE(recovery_token, ''),
             email_change_token_new = COALESCE(email_change_token_new, ''),
             email_change_token_current = COALESCE(email_change_token_current, ''),
             email_change = COALESCE(email_change, ''),
-            phone = COALESCE(phone, ''),
+            phone = NULLIF(phone, ''),
             phone_change = COALESCE(phone_change, ''),
             phone_change_token = COALESCE(phone_change_token, ''),
             reauthentication_token = COALESCE(reauthentication_token, ''),
-            encrypted_password = crypt(admin_password, gen_salt('bf')),
+            encrypted_password = crypt(p_password, gen_salt('bf')),
             email_confirmed_at = COALESCE(email_confirmed_at, now())
-        WHERE email = admin_email;
+        WHERE email = p_email;
 
-        -- Pastikan role di public.users adalah Admin
         UPDATE public.users
-           SET role = 'Admin', status = 'Aktif',
-               employee_id = pg_temp.seed_employee(admin_email, 'Super Administrator', 'Admin')
-         WHERE email = admin_email;
+           SET role = p_role, status = 'Aktif',
+               employee_id = pg_temp.seed_employee(p_email, p_name, p_role)
+         WHERE email = p_email;
     END IF;
-END $$;
+END;
+$$;
+
+-- 2. Akun Super Administrator
+--    Email: admin@faza.com
+--    Password: password123
+SELECT pg_temp.seed_staff_account(
+    '00000000-0000-0000-0000-000000000001', 'admin@faza.com', 'password123',
+    'Super Administrator', 'Admin');
 
 -- 2.1 Akun Kasir POS Kedai
 --     Email: kasir@faza.com
 --     Password: password123
-DO $$
-DECLARE
-    kasir_user_id UUID := '00000000-0000-0000-0000-000000000002';
-    kasir_email TEXT := 'kasir@faza.com';
-    kasir_password TEXT := 'password123';
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = kasir_email) THEN
-        INSERT INTO auth.users (
-            instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-            recovery_sent_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
-            created_at, updated_at, confirmation_token, email_change, email_change_token_new,
-            recovery_token, phone, phone_change, phone_change_token, reauthentication_token
-        ) VALUES (
-            '00000000-0000-0000-0000-000000000000',
-            kasir_user_id,
-            'authenticated',
-            'authenticated',
-            kasir_email,
-            crypt(kasir_password, gen_salt('bf')),
-            now(),
-            now(),
-            now(),
-            '{"provider":"email","providers":["email"]}',
-            '{"name":"Kasir Fantasi Coffee"}',
-            now(),
-            now(),
-            '', '', '', '', '', '', '', ''
-        );
-
-        INSERT INTO auth.identities (
-            id, provider_id, user_id, identity_data, provider, created_at, updated_at
-        ) VALUES (
-            gen_random_uuid(),
-            kasir_user_id::text,
-            kasir_user_id,
-            format('{"sub":"%s","email":"%s"}', kasir_user_id::text, kasir_email)::jsonb,
-            'email',
-            now(),
-            now()
-        );
-
-        INSERT INTO public.users (id, email, role, status, employee_id)
-        VALUES (kasir_user_id, kasir_email, 'Kasir', 'Aktif',
-                pg_temp.seed_employee(kasir_email, 'Kasir Fantasi Coffee', 'Kasir'))
-        ON CONFLICT (id) DO UPDATE
-            SET role = 'Kasir', status = 'Aktif', employee_id = EXCLUDED.employee_id;
-    ELSE
-        UPDATE auth.users
-        SET confirmation_token = COALESCE(confirmation_token, ''),
-            recovery_token = COALESCE(recovery_token, ''),
-            email_change_token_new = COALESCE(email_change_token_new, ''),
-            email_change_token_current = COALESCE(email_change_token_current, ''),
-            email_change = COALESCE(email_change, ''),
-            phone = COALESCE(phone, ''),
-            phone_change = COALESCE(phone_change, ''),
-            phone_change_token = COALESCE(phone_change_token, ''),
-            reauthentication_token = COALESCE(reauthentication_token, ''),
-            encrypted_password = crypt(kasir_password, gen_salt('bf')),
-            email_confirmed_at = COALESCE(email_confirmed_at, now())
-        WHERE email = kasir_email;
-
-        UPDATE public.users
-           SET role = 'Kasir', status = 'Aktif',
-               employee_id = pg_temp.seed_employee(kasir_email, 'Kasir Fantasi Coffee', 'Kasir')
-         WHERE email = kasir_email;
-    END IF;
-END $$;
+SELECT pg_temp.seed_staff_account(
+    '00000000-0000-0000-0000-000000000002', 'kasir@faza.com', 'password123',
+    'Kasir Fantasi Coffee', 'Kasir');
 
 -- 3. Kategori Produk Awal
 INSERT INTO public.categories (id, name, description, status) VALUES
